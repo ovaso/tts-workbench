@@ -1,7 +1,7 @@
 <template>
   <section class="page-shell">
     <div class="page-title">
-      <h1>Providers</h1>
+      <h1>厂商</h1>
       <v-btn icon="mdi-refresh" :loading="store.loading" variant="text" @click="reload" />
     </div>
 
@@ -14,9 +14,9 @@
         <v-table density="comfortable">
           <thead>
             <tr>
-              <th>Provider</th>
-              <th>Adapter</th>
-              <th class="text-right">Open</th>
+              <th>厂商</th>
+              <th>适配器</th>
+              <th class="text-right">打开</th>
             </tr>
           </thead>
           <tbody>
@@ -38,7 +38,7 @@
 
       <div class="work-panel pa-4">
         <JsonViewer v-if="selectedCapabilities" :value="selectedCapabilities" />
-        <div v-else class="text-medium-emphasis pa-4">No provider selected</div>
+        <div v-else class="text-medium-emphasis pa-4">未选择厂商</div>
       </div>
     </div>
   </section>

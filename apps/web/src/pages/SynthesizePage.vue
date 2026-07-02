@@ -1,14 +1,14 @@
 <template>
   <section class="page-shell">
     <div class="page-title">
-      <h1>Synthesize</h1>
+      <h1>语音合成</h1>
       <v-btn
         color="primary"
         prepend-icon="mdi-play"
         :loading="submitting"
         @click="submit"
       >
-        Run
+        运行
       </v-btn>
     </div>
 
@@ -19,13 +19,13 @@
     <div class="work-grid">
       <div class="work-panel pa-4">
         <ProviderSelector v-model="providerId" :providers="store.providers" />
-        <v-textarea v-model="text" auto-grow label="Text" rows="5" variant="outlined" />
+        <v-textarea v-model="text" auto-grow label="文本" rows="5" variant="outlined" />
         <v-row>
           <v-col cols="12" md="6">
             <v-select
               v-model="model"
               :items="modelItems"
-              label="Model"
+              label="模型"
               prepend-inner-icon="mdi-cube"
               variant="outlined"
             />
@@ -33,7 +33,7 @@
           <v-col cols="12" md="6">
             <v-text-field
               v-model="providerVoiceId"
-              label="Provider Voice"
+              label="厂商音色 ID"
               :placeholder="providerVoicePlaceholder"
               prepend-inner-icon="mdi-account-voice"
               variant="outlined"
@@ -46,19 +46,19 @@
               v-if="languageItems.length > 0"
               v-model="language"
               :items="languageItems"
-              label="Language"
+              label="语言"
               variant="outlined"
             />
-            <v-text-field v-else v-model="language" label="Language" variant="outlined" />
+            <v-text-field v-else v-model="language" label="语言" variant="outlined" />
           </v-col>
           <v-col cols="12" md="4">
-            <v-select v-model="format" :items="formats" label="Format" variant="outlined" />
+            <v-select v-model="format" :items="formats" label="编码格式" variant="outlined" />
           </v-col>
           <v-col cols="12" md="4">
             <v-select
               v-model.number="sampleRateHz"
               :items="sampleRates"
-              label="Sample Rate"
+              label="采样率"
               variant="outlined"
             />
           </v-col>
@@ -66,7 +66,14 @@
       </div>
 
       <div class="work-panel pa-4">
-        <v-select v-model="vendorMode" :items="vendorModes" label="Vendor Mode" variant="outlined" />
+        <v-select
+          v-model="vendorMode"
+          :items="vendorModeItems"
+          item-title="title"
+          item-value="value"
+          label="厂商参数模式"
+          variant="outlined"
+        />
         <VendorExtensionEditor v-model="vendorExtensionJson" />
       </div>
     </div>
@@ -96,7 +103,8 @@ import {
   languageOptionsForModel,
   modelById,
   modelOptions,
-  sampleRateOptionsForModel
+  sampleRateOptionsForModel,
+  vendorExtensionTemplateForOperation
 } from "./synthesize-options";
 
 const router = useRouter();
@@ -110,11 +118,24 @@ const language = ref("");
 const format = ref<TTSOutputFormat>("mp3");
 const sampleRateHz = ref(32000);
 const vendorMode = ref<VendorDirectiveMode>("prefer_vendor");
-const vendorExtensionJson = ref('{\n  "language_boost": "Chinese",\n  "output_format": "hex"\n}');
+const vendorExtensionJson = ref("{}");
 const submitting = ref(false);
 const error = ref("");
 
-const vendorModes: VendorDirectiveMode[] = ["canonical_only", "prefer_vendor", "vendor_required"];
+const vendorModeItems: Array<{ title: string; value: VendorDirectiveMode }> = [
+  {
+    title: "仅使用通用参数",
+    value: "canonical_only"
+  },
+  {
+    title: "优先使用厂商参数",
+    value: "prefer_vendor"
+  },
+  {
+    title: "必须使用厂商参数",
+    value: "vendor_required"
+  }
+];
 const currentCapabilities = computed(() => store.capabilities[providerId.value]);
 const currentModel = computed(() => modelById(currentCapabilities.value, model.value));
 const modelItems = computed(() => modelOptions(currentCapabilities.value));
@@ -144,8 +165,9 @@ watch(
     try {
       const capabilities = await store.loadCapabilities(nextProviderId);
       applyProviderDefaults(capabilities);
+      applyVendorExtensionTemplate();
     } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : "Failed to load provider capabilities.";
+      error.value = caught instanceof Error ? caught.message : "加载厂商能力失败。";
     }
   },
   {
@@ -155,6 +177,7 @@ watch(
 
 watch(model, () => {
   applyModelDefaults();
+  applyVendorExtensionTemplate();
 });
 
 async function submit() {
@@ -200,7 +223,7 @@ async function submit() {
     const result = await synthesizeSync(request);
     await router.push(`/runs/${result.runId}`);
   } catch (caught) {
-    error.value = caught instanceof Error ? caught.message : "Synthesis failed.";
+    error.value = caught instanceof Error ? caught.message : "语音合成失败。";
   } finally {
     submitting.value = false;
   }
@@ -230,6 +253,15 @@ function applyModelDefaults() {
   language.value = defaultLanguageForModel(currentModel.value);
 }
 
+// applyVendorExtensionTemplate: 无入参；功能是根据当前厂商与模型刷新厂商参数完整模板。
+function applyVendorExtensionTemplate() {
+  vendorExtensionJson.value = vendorExtensionTemplateForOperation(
+    currentCapabilities.value,
+    "tts.sync",
+    currentModel.value
+  );
+}
+
 // parseVendorParams: 无入参；功能是把 vendor extension 编辑器内容解析为对象参数。
 function parseVendorParams(): VendorPayload {
   const raw = vendorExtensionJson.value.trim();
@@ -238,9 +270,27 @@ function parseVendorParams(): VendorPayload {
   }
   const parsed = JSON.parse(raw) as unknown;
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Vendor extension JSON must be an object.");
+    throw new Error("厂商特定参数 JSON 必须是对象。");
   }
-  return parsed as VendorPayload;
+  return pruneEmptyVendorParams(parsed as VendorPayload);
+}
+
+// pruneEmptyVendorParams: 入参为厂商参数对象；输出去掉空占位值后的对象，确保未配置项走厂商默认。
+function pruneEmptyVendorParams(params: VendorPayload): VendorPayload {
+  return Object.fromEntries(
+    Object.entries(params).filter(([, value]) => {
+      if (value === null || value === undefined) {
+        return false;
+      }
+      if (Array.isArray(value)) {
+        return value.length > 0;
+      }
+      if (typeof value === "object") {
+        return Object.keys(value).length > 0;
+      }
+      return true;
+    })
+  );
 }
 
 onMounted(async () => {

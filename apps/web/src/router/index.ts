@@ -3,6 +3,7 @@ import ProvidersPage from "../pages/ProvidersPage.vue";
 import RunDetailPage from "../pages/RunDetailPage.vue";
 import RunsPage from "../pages/RunsPage.vue";
 import SynthesizePage from "../pages/SynthesizePage.vue";
+import VoiceClonePage from "../pages/VoiceClonePage.vue";
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -20,6 +21,11 @@ export const router = createRouter({
       path: "/synthesize",
       name: "synthesize",
       component: SynthesizePage
+    },
+    {
+      path: "/voice-clone",
+      name: "voice-clone",
+      component: VoiceClonePage
     },
     {
       path: "/runs",

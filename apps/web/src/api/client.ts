@@ -19,7 +19,7 @@ export async function requestJson<T>(path: string, options?: Options): Promise<T
     if (error instanceof HTTPError) {
       const body = await error.response.text();
       throw new Error(
-        body.length > 0 ? body : `Request failed with status ${error.response.status}`
+        body.length > 0 ? body : `请求失败，状态码 ${error.response.status}`
       );
     }
     throw error;

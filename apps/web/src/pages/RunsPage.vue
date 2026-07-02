@@ -1,7 +1,7 @@
 <template>
   <section class="page-shell">
     <div class="page-title">
-      <h1>Runs</h1>
+      <h1>运行记录</h1>
       <v-btn icon="mdi-refresh" :loading="loading" variant="text" @click="load" />
     </div>
 
@@ -13,11 +13,11 @@
       <v-table density="comfortable">
         <thead>
           <tr>
-            <th>Run</th>
-            <th>Provider</th>
-            <th>Created</th>
-            <th>Audio</th>
-            <th class="text-right">Open</th>
+            <th>运行 ID</th>
+            <th>厂商</th>
+            <th>创建时间</th>
+            <th>音频</th>
+            <th class="text-right">打开</th>
           </tr>
         </thead>
         <tbody>
@@ -57,7 +57,7 @@ async function load() {
   try {
     runs.value = await listRuns();
   } catch (caught) {
-    error.value = caught instanceof Error ? caught.message : "Failed to load runs.";
+    error.value = caught instanceof Error ? caught.message : "加载运行记录失败。";
   } finally {
     loading.value = false;
   }

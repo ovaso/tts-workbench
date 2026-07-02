@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MiniMaxTTSAdapter } from "../adapters/minimax/adapter";
+import { minimaxExtensionSchema } from "../adapters/minimax/extension-schema";
 
 describe("MiniMaxTTSAdapter", () => {
   it("plans MiniMax sync TTS with canonical fields, defaults, and vendor extensions", async () => {
@@ -142,5 +143,28 @@ describe("MiniMaxTTSAdapter", () => {
       }
     });
     expect(plan.mappingReport.appliedCanonicalFields.map((field) => field.field)).not.toContain("voice");
+  });
+
+  it("exposes only user-editable MiniMax voice clone extras through the vendor extension schema", () => {
+    const schema = minimaxExtensionSchema("voice.clone.create").jsonSchema;
+
+    expect(schema).toMatchObject({
+      properties: {
+        clone_prompt: {
+          type: "object",
+          properties: {
+            prompt_text: {
+              type: "string"
+            }
+          }
+        },
+        text: {
+          type: "string"
+        }
+      }
+    });
+    expect(Object.keys((schema.properties ?? {}) as Record<string, unknown>)).not.toContain("file_id");
+    expect(Object.keys((schema.properties ?? {}) as Record<string, unknown>)).not.toContain("voice_id");
+    expect(Object.keys((schema.properties ?? {}) as Record<string, unknown>)).not.toContain("model");
   });
 });

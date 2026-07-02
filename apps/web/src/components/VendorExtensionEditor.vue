@@ -3,7 +3,7 @@
     :model-value="modelValue"
     auto-grow
     density="comfortable"
-    label="Vendor Extension JSON"
+    label="厂商特定参数 JSON"
     prepend-inner-icon="mdi-code-json"
     rows="7"
     spellcheck="false"

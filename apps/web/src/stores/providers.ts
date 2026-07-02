@@ -20,13 +20,13 @@ export const useProvidersStore = defineStore("providers", {
       try {
         this.providers = await listProviders();
       } catch (error) {
-        this.error = error instanceof Error ? error.message : "Failed to load providers.";
+        this.error = error instanceof Error ? error.message : "加载厂商列表失败。";
       } finally {
         this.loading = false;
       }
     },
-    async loadCapabilities(providerId: string) {
-      if (this.capabilities[providerId] !== undefined) {
+    async loadCapabilities(providerId: string, options: { force?: boolean } = {}) {
+      if (options.force !== true && this.capabilities[providerId] !== undefined) {
         return this.capabilities[providerId];
       }
       const capabilities = await getCapabilities(providerId);

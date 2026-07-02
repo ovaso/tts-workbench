@@ -10,7 +10,8 @@ import {
   languageOptionsForModel,
   modelById,
   modelOptions,
-  sampleRateOptionsForModel
+  sampleRateOptionsForModel,
+  vendorExtensionTemplateForOperation
 } from "./synthesize-options";
 
 const capabilities: TTSCapabilities = {
@@ -56,7 +57,38 @@ const capabilities: TTSCapabilities = {
       }
     }
   ],
-  operations: {}
+  operations: {
+    "tts.sync": {
+      operation: "tts.sync",
+      supported: true,
+      canonicalControls: {},
+      vendorExtensionSchema: {
+        schemaVersion: "1.0.0",
+        title: "Demo",
+        jsonSchema: {
+          type: "object",
+          properties: {
+            language_boost: {
+              type: ["string", "null"]
+            },
+            output_format: {
+              type: "string",
+              enum: ["hex", "url"]
+            },
+            subtitle_enable: {
+              type: "boolean"
+            },
+            pronunciation_dict: {
+              type: "object"
+            },
+            timbre_weights: {
+              type: "array"
+            }
+          }
+        }
+      }
+    }
+  }
 };
 
 describe("synthesize options", () => {
@@ -74,6 +106,18 @@ describe("synthesize options", () => {
     expect(defaultFormatForModel(model)).toBe("mp3");
     expect(defaultSampleRateForModel(model)).toBe(32000);
     expect(defaultLanguageForModel(model)).toBe("Chinese");
-    expect(defaultVoicePlaceholderForModel(model)).toBe("Default: demo-default-voice");
+    expect(defaultVoicePlaceholderForModel(model)).toBe("默认：demo-default-voice");
+  });
+
+  it("builds a full vendor extension template from operation schema", () => {
+    const model = modelById(capabilities, "demo-model");
+
+    expect(JSON.parse(vendorExtensionTemplateForOperation(capabilities, "tts.sync", model))).toEqual({
+      language_boost: "Chinese",
+      output_format: "hex",
+      subtitle_enable: false,
+      pronunciation_dict: {},
+      timbre_weights: []
+    });
   });
 });

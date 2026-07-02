@@ -39,6 +39,33 @@ export const minimaxSyncExtensionSchema: VendorExtensionSchema = {
   }
 };
 
+// minimaxVoiceCloneExtensionSchema: MiniMax 音色克隆厂商扩展 schema，只暴露无通用表单承载的厂商补充项。
+export const minimaxVoiceCloneExtensionSchema: VendorExtensionSchema = {
+  schemaVersion: "1.0.0",
+  title: "MiniMax voice clone extension",
+  description: "MiniMax-specific voice clone parameters not already represented by the canonical clone form.",
+  jsonSchema: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      clone_prompt: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          prompt_text: {
+            type: "string",
+            default: ""
+          }
+        }
+      },
+      text: {
+        type: "string",
+        default: ""
+      }
+    }
+  }
+};
+
 // emptySchema: 暂未实现或没有厂商扩展的 operation 使用空 schema。
 const emptySchema: VendorExtensionSchema = {
   schemaVersion: "1.0.0",
@@ -54,6 +81,9 @@ const emptySchema: VendorExtensionSchema = {
 export function minimaxExtensionSchema(operation: TTSOperation): VendorExtensionSchema {
   if (operation === "tts.sync" || operation === "tts.stream") {
     return minimaxSyncExtensionSchema;
+  }
+  if (operation === "voice.clone.create") {
+    return minimaxVoiceCloneExtensionSchema;
   }
   return emptySchema;
 }

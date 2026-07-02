@@ -11,7 +11,7 @@
 
     <div v-if="detail" class="work-panel pa-4">
       <div class="run-meta mb-4">
-        Created {{ formatLocalDateTime(detail.result.createdAt) }}
+        创建时间 {{ formatLocalDateTime(detail.result.createdAt) }}
       </div>
       <AudioPlayer
         v-if="detail.result.audio.url"
@@ -20,11 +20,11 @@
         :src="detail.result.audio.url"
       />
       <v-tabs v-model="tab" density="comfortable">
-        <v-tab value="request">Request</v-tab>
-        <v-tab value="plan">Plan</v-tab>
-        <v-tab value="mapping">Mapping</v-tab>
-        <v-tab value="result">Result</v-tab>
-        <v-tab value="vendor">Vendor</v-tab>
+        <v-tab value="request">请求</v-tab>
+        <v-tab value="plan">计划</v-tab>
+        <v-tab value="mapping">映射</v-tab>
+        <v-tab value="result">结果</v-tab>
+        <v-tab value="vendor">厂商</v-tab>
       </v-tabs>
 
       <v-window v-model="tab" class="mt-4">
@@ -77,7 +77,7 @@ async function load() {
   try {
     detail.value = await getRun(props.runId);
   } catch (caught) {
-    error.value = caught instanceof Error ? caught.message : "Failed to load run.";
+    error.value = caught instanceof Error ? caught.message : "加载运行详情失败。";
   } finally {
     loading.value = false;
   }

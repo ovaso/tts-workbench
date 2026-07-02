@@ -5,7 +5,7 @@
     density="comfortable"
     item-title="title"
     item-value="value"
-    label="Provider"
+    label="厂商"
     prepend-inner-icon="mdi-server"
     variant="outlined"
     @update:model-value="emit('update:modelValue', String($event))"

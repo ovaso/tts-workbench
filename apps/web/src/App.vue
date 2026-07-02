@@ -34,17 +34,22 @@ const isPermanent = display.smAndUp;
 
 const navItems = [
   {
-    title: "Synthesize",
+    title: "语音合成",
     icon: "mdi-waveform",
     to: "/synthesize"
   },
   {
-    title: "Providers",
+    title: "音色克隆",
+    icon: "mdi-account-voice",
+    to: "/voice-clone"
+  },
+  {
+    title: "厂商",
     icon: "mdi-server",
     to: "/providers"
   },
   {
-    title: "Runs",
+    title: "运行记录",
     icon: "mdi-history",
     to: "/runs"
   }

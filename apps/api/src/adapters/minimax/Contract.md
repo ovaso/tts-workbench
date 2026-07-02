@@ -386,3 +386,26 @@ sequenceDiagram
   }
 }
 ```
+
+### Voice Clone Vendor Extension Contract
+
+音色克隆页面的厂商特定参数模板来自 `voice.clone.create` 的 vendor extension schema。该 schema 只暴露没有通用表单承载的 MiniMax 专有补充项。
+
+`file_id`、`clone_prompt.prompt_audio`、`voice_id` 和 `model` 不在用户可编辑的 vendor extension 中暴露：
+
+- `file_id` 由后端上传主参考音频到 `/v1/files/upload` 后写入 vendor request。
+- `clone_prompt.prompt_audio` 后续应由可选 prompt 音频文件上传后写入 vendor request。
+- `voice_id` 后续由音色克隆表单中的音色名称/ID 映射。
+- `model` 由页面模型选择和 canonical request 决定。
+
+```json
+{
+  "schemaVersion": "1.0.0",
+  "params": {
+    "clone_prompt": {
+      "prompt_text": "参考文本"
+    },
+    "text": "试听文本"
+  }
+}
+```

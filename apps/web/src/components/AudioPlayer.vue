@@ -5,7 +5,7 @@
       {{ downloadOnlyMessage }}
       <template #append>
         <v-btn :href="source" download variant="text">
-          Download
+          下载
         </v-btn>
       </template>
     </v-alert>
