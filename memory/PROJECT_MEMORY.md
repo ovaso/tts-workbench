@@ -5,6 +5,7 @@
 - 已建立 pnpm workspace Skeleton。
 - 根目录包含 `package.json`、`pnpm-workspace.yaml`、`tsconfig.base.json`、`.node-version`、`.gitignore`。
 - `packages/core` 已建立共享契约层，包含 operation、request、result、capability、vendor extension、mapping report、adapter contract、error model。
+- `packages/core` 已吸收 `CORE_DESIGN.md` 中适合当前阶段的能力维度：扩展音频格式、stream 偏好、voice clone consent/reference audio 元数据、细化 capability、plan-first clone/delete adapter contract。
 - `apps/api` 已建立 Fastify + TypeScript 后端骨架，并按当前架构边界使用 Vite Vanilla 模式作为默认 build 工具。
 - `apps/api` 已包含 mock adapter、adapter registry、TTS facade、run archive、health/provider/sync/runs routes。
 - `apps/web` 已建立 Vue 3 + Vite + TypeScript + Pinia + VueRouter + Vuetify 控制台骨架。
@@ -33,6 +34,7 @@
   - run archive file contract test
   - API route test
   - Web API client test
+- 已为 core 契约补充测试，覆盖 richer audio output、stream preferences、reference audio format、plan-first clone execution、stream event lifecycle。
 
 ## 验证结果
 
@@ -46,6 +48,8 @@
 - Web 当前是 Skeleton 控制台，表单校验和错误展示仍较轻。
 - Web build 阶段有 Vuetify/MDI 首包大于 500 kB 的常规提示，后续可通过图标按需加载或路由切分优化。
 - Voice clone 和 streaming 目前只在 core contract/capability 中保留边界，尚未实现 route 与 mock lifecycle。
+- Adapter contract 已要求 voice clone/delete consume plan，但 API facade 和 mock adapter 尚未实现 voice clone/stream 执行链路。
+- Run archive 当前仍主要服务 `tts.sync`，尚未扩展到 `tts.stream` 和 `voice.clone.*` 的多步骤 vendor request/response 记录。
 - 当前 run archive 是本地文件系统事实来源，尚未建立索引层。
 
 ## 下一步内容或计划内容
@@ -55,7 +59,9 @@
   - `POST /v1/voices/clone`
   - `GET /v1/voices`
   - `data/voices/{voiceId}.json`
+- 扩展 run archive 类型和实现，使 voice clone 能保存 upload/clone/delete 等 vendor workflow steps。
 - 增加 streaming contract 对应的 route skeleton，但不要急于接真实 WebSocket 厂商。
+- 接入 MiniMax 前，先实现 MiniMax capability/extension schema fixture，并覆盖 HTTP TTS 的 plan/mapping 单元测试。
 - 为 Web 增加更明确的 loading/empty/error 状态和 run detail 文件下载入口。
 
 ## 推荐内容

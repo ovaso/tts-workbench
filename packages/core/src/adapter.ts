@@ -12,6 +12,7 @@ import type {
 import type {
   TTSSyncProviderResult,
   TTSStreamEvent,
+  VoiceCloneDeleteResult,
   VoiceCloneResult
 } from "./results";
 import type { VendorExtensionSchema, VendorPayload } from "./vendor-extension";
@@ -69,6 +70,7 @@ export interface TTSAdapter {
 
   synthesizeSync?(plan: TTSSyncPlan): Promise<TTSSyncProviderResult>;
   synthesizeStream?(plan: TTSStreamPlan): AsyncIterable<TTSStreamEvent>;
-  createVoiceClone?(request: VoiceCloneRequest): Promise<VoiceCloneResult>;
-  deleteVoiceClone?(voiceId: string): Promise<void>;
+  createVoiceClone?(plan: VoiceClonePlan): Promise<VoiceCloneResult>;
+  createInstantVoiceClone?(plan: VoiceCloneInstantPlan): Promise<VoiceCloneResult>;
+  deleteVoiceClone?(plan: VoiceCloneDeletePlan): Promise<VoiceCloneDeleteResult>;
 }

@@ -88,7 +88,7 @@ const vendorExtensionJson = ref('{\n  "toneHz": 440,\n  "durationMs": 600\n}');
 const submitting = ref(false);
 const error = ref("");
 
-const formats: TTSOutputFormat[] = ["wav", "mp3", "ogg", "pcm"];
+const formats: TTSOutputFormat[] = ["wav", "mp3", "ogg", "pcm", "flac", "opus"];
 const sampleRates = [16000, 24000, 48000];
 const vendorModes: VendorDirectiveMode[] = ["canonical_only", "prefer_vendor", "vendor_required"];
 

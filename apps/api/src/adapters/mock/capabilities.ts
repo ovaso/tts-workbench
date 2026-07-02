@@ -14,6 +14,7 @@ export function mockCapabilities(adapterVersion: string): TTSCapabilities {
         supported: true,
         outputFormats: ["wav"],
         sampleRatesHz: [16000, 24000, 48000],
+        maxTextChars: 10000,
         canonicalControls: {
           speed: {
             support: "supported",
@@ -43,8 +44,13 @@ export function mockCapabilities(adapterVersion: string): TTSCapabilities {
         operation: "tts.stream",
         supported: false,
         transportProtocols: ["websocket", "sse", "http_chunk"],
+        inputModes: ["text_once", "text_incremental"],
         outputFormats: ["wav", "pcm"],
+        outputChunkFormats: ["pcm"],
         sampleRatesHz: [16000, 24000],
+        maxTextChars: 10000,
+        supportsTimestamps: false,
+        supportsInterruption: false,
         canonicalControls: {},
         vendorExtensionSchema: mockExtensionSchema("tts.stream"),
         notes: ["Contract is declared, but streaming execution is intentionally deferred."]
@@ -56,7 +62,10 @@ export function mockCapabilities(adapterVersion: string): TTSCapabilities {
           persistent: true,
           instant: false,
           requiresTranscript: false,
-          supportedAudioFormats: ["wav", "mp3"]
+          supportedAudioFormats: ["wav", "mp3", "m4a"],
+          minReferenceAudioSeconds: 10,
+          maxReferenceAudioSeconds: 300,
+          maxReferenceAudioFiles: 1
         },
         canonicalControls: {},
         vendorExtensionSchema: mockExtensionSchema("voice.clone.create"),
@@ -69,7 +78,10 @@ export function mockCapabilities(adapterVersion: string): TTSCapabilities {
           persistent: false,
           instant: true,
           requiresTranscript: false,
-          supportedAudioFormats: ["wav", "mp3"]
+          supportedAudioFormats: ["wav", "mp3", "m4a"],
+          minReferenceAudioSeconds: 10,
+          maxReferenceAudioSeconds: 300,
+          maxReferenceAudioFiles: 1
         },
         canonicalControls: {},
         vendorExtensionSchema: mockExtensionSchema("voice.clone.instant")

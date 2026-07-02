@@ -1,9 +1,15 @@
 import type { TTSOperation } from "./operations";
 import type { VendorExtensionSchema } from "./vendor-extension";
 
-export type TTSOutputFormat = "wav" | "mp3" | "ogg" | "pcm";
+export type TTSAudioOutputFormat = "wav" | "mp3" | "ogg" | "pcm" | "flac" | "opus";
+
+export type ReferenceAudioFormat = TTSAudioOutputFormat | "m4a";
+
+export type TTSOutputFormat = TTSAudioOutputFormat;
 
 export type TTSStreamProtocol = "websocket" | "sse" | "http_chunk";
+
+export type TTSStreamInputMode = "text_once" | "text_incremental";
 
 export type CapabilitySupport = "supported" | "approximated" | "ignored" | "unsupported";
 
@@ -28,16 +34,23 @@ export interface VoiceCloneCapability {
   persistent: boolean;
   instant: boolean;
   requiresTranscript: boolean;
-  supportedAudioFormats: TTSOutputFormat[];
+  supportedAudioFormats: ReferenceAudioFormat[];
+  minReferenceAudioSeconds?: number;
   maxReferenceAudioSeconds?: number;
+  maxReferenceAudioFiles?: number;
 }
 
 export interface TTSOperationCapability {
   operation: TTSOperation;
   supported: boolean;
   transportProtocols?: TTSStreamProtocol[];
+  inputModes?: TTSStreamInputMode[];
   outputFormats?: TTSOutputFormat[];
+  outputChunkFormats?: TTSOutputFormat[];
   sampleRatesHz?: number[];
+  maxTextChars?: number;
+  supportsTimestamps?: boolean;
+  supportsInterruption?: boolean;
   voiceClone?: VoiceCloneCapability;
   canonicalControls: Partial<Record<CanonicalControlName, CanonicalControlCapability>>;
   vendorExtensionSchema?: VendorExtensionSchema;

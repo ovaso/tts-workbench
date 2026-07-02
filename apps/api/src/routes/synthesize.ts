@@ -76,7 +76,14 @@ function parseOutput(value: unknown): TTSSyncRequest["output"] | undefined {
   const output = requireObject(value, "output");
   const parsed: TTSSyncRequest["output"] = {};
   if (output.format !== undefined) {
-    if (output.format !== "wav" && output.format !== "mp3" && output.format !== "ogg" && output.format !== "pcm") {
+    if (
+      output.format !== "wav" &&
+      output.format !== "mp3" &&
+      output.format !== "ogg" &&
+      output.format !== "pcm" &&
+      output.format !== "flac" &&
+      output.format !== "opus"
+    ) {
       throw new TTSError("output.format is not supported.", "invalid_request", 400);
     }
     parsed.format = output.format;
@@ -86,6 +93,18 @@ function parseOutput(value: unknown): TTSSyncRequest["output"] | undefined {
       throw new TTSError("output.sampleRateHz must be a number.", "invalid_request", 400);
     }
     parsed.sampleRateHz = output.sampleRateHz;
+  }
+  if (output.bitrate !== undefined) {
+    if (typeof output.bitrate !== "number" || !Number.isFinite(output.bitrate)) {
+      throw new TTSError("output.bitrate must be a number.", "invalid_request", 400);
+    }
+    parsed.bitrate = output.bitrate;
+  }
+  if (output.channels !== undefined) {
+    if (output.channels !== 1 && output.channels !== 2) {
+      throw new TTSError("output.channels must be 1 or 2.", "invalid_request", 400);
+    }
+    parsed.channels = output.channels;
   }
   return parsed;
 }

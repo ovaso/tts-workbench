@@ -1,4 +1,4 @@
-import type { TTSOutputFormat } from "./capabilities";
+import type { TTSOutputFormat, TTSStreamProtocol } from "./capabilities";
 import type { TTSOperation } from "./operations";
 import type { VendorPayload } from "./vendor-extension";
 
@@ -38,15 +38,23 @@ export interface TTSStreamSession {
   sessionId: string;
   providerId: string;
   operation: "tts.stream";
-  protocol: "websocket" | "sse" | "http_chunk";
+  protocol: TTSStreamProtocol;
   url?: string;
 }
 
 export type TTSStreamEvent =
   | {
-      type: "audio";
+      type: "session.started";
+      sessionId: string;
+      planId: string;
+      sequence: number;
+    }
+  | {
+      type: "audio.chunk";
       sequence: number;
       data: Uint8Array;
+      format: TTSOutputFormat;
+      timestampMs?: number;
     }
   | {
       type: "metadata";
@@ -54,8 +62,15 @@ export type TTSStreamEvent =
       payload: VendorPayload;
     }
   | {
-      type: "done";
+      type: "warning";
       sequence: number;
+      warning: VendorPayload;
+    }
+  | {
+      type: "session.completed";
+      sequence: number;
+      durationMs?: number;
+      audioPath?: string;
     }
   | {
       type: "error";
@@ -66,9 +81,19 @@ export type TTSStreamEvent =
 export interface VoiceRecord {
   voiceId: string;
   providerId: string;
+  providerVoiceId: string;
   displayName: string;
+  source: "vendor_builtin" | "cloned";
+  language?: string;
   createdAt: string;
   sourceOperation: Extract<TTSOperation, "voice.clone.create" | "voice.clone.instant">;
+  clone?: {
+    referenceAudioIds?: string[];
+    createdAt: string;
+    consentScope?: string;
+    expiresAt?: string;
+  };
+  vendorMetadata?: VendorPayload;
 }
 
 export interface VoiceQuery {
@@ -77,5 +102,12 @@ export interface VoiceQuery {
 
 export interface VoiceCloneResult {
   voice: VoiceRecord;
+  vendorResponse: VendorPayload;
+}
+
+export interface VoiceCloneDeleteResult {
+  voiceId: string;
+  providerId: string;
+  deletedAt: string;
   vendorResponse: VendorPayload;
 }

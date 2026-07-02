@@ -1,4 +1,4 @@
-import type { TTSOutputFormat } from "./capabilities";
+import type { ReferenceAudioFormat, TTSOutputFormat, TTSStreamProtocol } from "./capabilities";
 import type { TTSOperation } from "./operations";
 import type { VendorDirective } from "./vendor-extension";
 
@@ -11,6 +11,8 @@ export interface TTSVoiceSelection {
 export interface TTSOutputPreferences {
   format?: TTSOutputFormat;
   sampleRateHz?: number;
+  bitrate?: number;
+  channels?: 1 | 2;
 }
 
 export interface TTSCanonicalControls {
@@ -19,6 +21,12 @@ export interface TTSCanonicalControls {
   volume?: number;
   emotion?: string;
   style?: string;
+}
+
+export interface TTSStreamPreferences {
+  protocol?: TTSStreamProtocol;
+  chunkFormat?: TTSOutputFormat;
+  enableTimestamps?: boolean;
 }
 
 export interface TTSSyncRequest {
@@ -40,6 +48,7 @@ export interface TTSStreamRequest {
   model?: string;
   voice: TTSVoiceSelection;
   output?: TTSOutputPreferences;
+  stream?: TTSStreamPreferences;
   controls?: TTSCanonicalControls;
   vendor?: VendorDirective;
   clientRequestId?: string;
@@ -47,15 +56,26 @@ export interface TTSStreamRequest {
 
 export interface ReferenceAudio {
   uri: string;
-  format?: TTSOutputFormat;
+  fileId?: string;
+  path?: string;
+  format?: ReferenceAudioFormat;
+  durationMs?: number;
   transcript?: string;
+}
+
+export interface VoiceCloneConsent {
+  confirmed: boolean;
+  speakerName?: string;
+  usageScope?: "internal_eval" | "commercial" | "research";
 }
 
 export interface VoiceCloneRequest {
   operation: "voice.clone.create";
   providerId: string;
   displayName: string;
+  language?: string;
   referenceAudio: ReferenceAudio[];
+  consent?: VoiceCloneConsent;
   vendor?: VendorDirective;
   clientRequestId?: string;
 }
@@ -64,9 +84,11 @@ export interface VoiceCloneInstantRequest {
   operation: "voice.clone.instant";
   providerId: string;
   text: string;
+  language?: string;
   referenceAudio: ReferenceAudio[];
   output?: TTSOutputPreferences;
   controls?: TTSCanonicalControls;
+  consent?: VoiceCloneConsent;
   vendor?: VendorDirective;
   clientRequestId?: string;
 }
