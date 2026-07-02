@@ -31,7 +31,7 @@ describe("api app", () => {
     });
   });
 
-  it("lists the mock provider", async () => {
+  it("lists registered providers", async () => {
     const response = await app.inject({
       method: "GET",
       url: "/v1/providers"
@@ -43,6 +43,11 @@ describe("api app", () => {
         {
           providerId: "mock",
           providerName: "Local Mock TTS",
+          adapterVersion: "0.1.0"
+        },
+        {
+          providerId: "minimax",
+          providerName: "MiniMax",
           adapterVersion: "0.1.0"
         }
       ]

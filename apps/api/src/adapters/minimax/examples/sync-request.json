@@ -1,0 +1,37 @@
+{
+  "providerId": "minimax",
+  "text": "今天是不是很开心呀(laughs)，当然了！",
+  "model": "speech-2.8-hd",
+  "voice": {
+    "providerVoiceId": "male-qn-qingse"
+  },
+  "output": {
+    "format": "mp3",
+    "sampleRateHz": 32000,
+    "bitrate": 128000,
+    "channels": 1
+  },
+  "controls": {
+    "speed": 1,
+    "volume": 1,
+    "pitch": 0,
+    "emotion": "happy"
+  },
+  "vendor": {
+    "mode": "prefer_vendor",
+    "extensions": {
+      "minimax": {
+        "schemaVersion": "1.0.0",
+        "params": {
+          "language_boost": "Chinese",
+          "subtitle_enable": false,
+          "subtitle_type": "sentence",
+          "output_format": "hex",
+          "pronunciation_dict": {
+            "tone": ["处理/(chu3)(li3)", "危险/dangerous"]
+          }
+        }
+      }
+    }
+  }
+}

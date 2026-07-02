@@ -39,6 +39,13 @@
 - Adapter capability 现在必须声明 `vendorModels`，模型同样属于 vendor：每个模型声明支持的 operation、canonical model capability（如 text/SSML、输出格式、采样率、controls、clone 限制）以及模型专属 `vendorModelFeatureSchema`。
 - `TTSSyncRequest` 和 `TTSStreamRequest` 已补 `ssml?: string`；是否可用由选定 vendor model capability 决定。
 - Vendor/model capability 中的支持项只是静态事实，不等于本次请求开启；只有 request 中出现的字段才视为启用。request 未配置的选项使用 vendor/model default configuration；request 配置但当前 vendor/model 不支持的字段写入 mapping report 的 ignored fields，并使用厂商默认值。
+- 已新增 MiniMax adapter 初版：
+  - 注册 providerId `minimax`
+  - 声明 `speech-2.8-*`、`speech-2.6-*`、`speech-02-*`、`speech-01-*` vendor models
+  - 声明 HTTP TTS、WebSocket TTS、持久音色复刻 capability
+  - 实现 `tts.sync` plan/mapping 和真实 HTTP `/v1/t2a_v2` 执行
+  - 支持 `MINIMAX_API_KEY`，测试通过 injectable fetch 避免真实网络调用
+  - 支持 MiniMax vendor extension：`pronunciation_dict`、`timbre_weights`、`language_boost`、`voice_modify`、`subtitle_enable`、`subtitle_type`、`output_format`、`aigc_watermark`
 
 ## 验证结果
 
@@ -54,6 +61,7 @@
 - Voice clone 和 streaming 目前只在 core contract/capability 中保留边界，尚未实现 route 与 mock lifecycle。
 - Adapter contract 已要求 voice clone/delete consume plan，但 API facade 和 mock adapter 尚未实现 voice clone/stream 执行链路。
 - Run archive 当前仍主要服务 `tts.sync`，尚未扩展到 `tts.stream` 和 `voice.clone.*` 的多步骤 vendor request/response 记录。
+- MiniMax 当前只实现 HTTP sync TTS 执行；WebSocket TTS 和 voice clone 已声明 capability，但执行链路、route/archive/workflow 尚未实现。
 - 当前 run archive 是本地文件系统事实来源，尚未建立索引层。
 
 ## 下一步内容或计划内容
@@ -65,8 +73,9 @@
   - `data/voices/{voiceId}.json`
 - 扩展 run archive 类型和实现，使 voice clone 能保存 upload/clone/delete 等 vendor workflow steps。
 - 增加 streaming contract 对应的 route skeleton，但不要急于接真实 WebSocket 厂商。
-- 接入 MiniMax 前，先实现 MiniMax capability/extension schema fixture，并覆盖 HTTP TTS 的 plan/mapping 单元测试。
-- MiniMax adapter 应把 `speech-2.8-hd`、`speech-2.8-turbo`、`speech-2.6-*`、`speech-02-*` 等作为 `vendorModels` 内置声明；模型级特定能力如 `language_boost`、`pronunciation_dict`、字幕、voice_modify 等通过 `vendorModelFeatureSchema` 暴露。
+- MiniMax 下一步补 WebSocket `task_start/task_continue/task_finish` 到 `TTSStreamEvent` 的适配。
+- MiniMax 下一步补 voice clone 的 `/v1/files/upload` + `/v1/voice_clone` 多步骤 workflow archive。
+- MiniMax 后续可继续细化文档字段的 extension schema 校验。
 - 为 Web 增加更明确的 loading/empty/error 状态和 run detail 文件下载入口。
 
 ## 推荐内容

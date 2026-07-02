@@ -1,6 +1,7 @@
 import cors from "@fastify/cors";
 import { TTSError } from "@tts-platform/core";
 import fastify, { type FastifyInstance } from "fastify";
+import { MiniMaxTTSAdapter } from "./adapters/minimax/adapter";
 import { MockTTSAdapter } from "./adapters/mock/adapter";
 import { AdapterRegistry } from "./facade/adapter-registry";
 import { TTSFacade } from "./facade/tts-facade";
@@ -25,7 +26,13 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     origin: true
   });
 
-  const registry = new AdapterRegistry([new MockTTSAdapter()]);
+  const registry = new AdapterRegistry([
+    new MockTTSAdapter(),
+    // MiniMaxTTSAdapter: 注册真实厂商 adapter；无 API key 时仍可查看 capability，真实执行时再校验密钥。
+    new MiniMaxTTSAdapter({
+      apiKey: process.env.MINIMAX_API_KEY
+    })
+  ]);
   const archive = new FileRunArchive(options.dataRoot);
   const voices = new InMemoryVoiceRegistry();
   const facade = new TTSFacade(registry, archive, voices);
