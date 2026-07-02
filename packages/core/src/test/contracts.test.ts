@@ -65,6 +65,48 @@ describe("core contracts", () => {
         supportsInstantVoiceClone: false,
         supportsVoiceCloneDelete: true
       },
+      vendorModels: [
+        {
+          modelId: "speech-2.8-hd",
+          displayName: "speech-2.8-hd",
+          defaultForOperations: ["tts.sync", "tts.stream", "voice.clone.create"],
+          canonicalCapabilities: {
+            supportsText: true,
+            supportsSSML: false,
+            supportedOperations: ["tts.sync", "tts.stream", "voice.clone.create"],
+            outputFormats: ["mp3", "wav", "flac"],
+            outputChunkFormats: ["mp3"],
+            sampleRatesHz: [16000, 24000, 32000],
+            maxTextChars: 10000,
+            canonicalControls: {
+              speed: {
+                support: "supported",
+                min: 0.5,
+                max: 2
+              },
+              emotion: {
+                support: "supported",
+                values: ["happy", "sad", "angry"]
+              }
+            }
+          },
+          vendorModelFeatureSchema: {
+            schemaVersion: "1.0.0",
+            title: "MiniMax speech model features",
+            jsonSchema: {
+              type: "object",
+              properties: {
+                language_boost: {
+                  type: "string"
+                },
+                pronunciation_dict: {
+                  type: "object"
+                }
+              }
+            }
+          }
+        }
+      ],
       operations: {
         "tts.sync": {
           operation: "tts.sync",
@@ -82,6 +124,7 @@ describe("core contracts", () => {
     } satisfies import("../index").TTSCapabilities;
 
     expect(capabilities.vendorFeatures.supportsHttpTTS).toBe(true);
+    expect(capabilities.vendorModels[0]?.canonicalCapabilities.supportsSSML).toBe(false);
     expect(capabilities.operations["tts.sync"]?.transportProtocols).toEqual(["https"]);
   });
 
@@ -90,6 +133,7 @@ describe("core contracts", () => {
       operation: "tts.stream",
       providerId: "minimax",
       text: "hello stream",
+      ssml: "<speak>hello stream</speak>",
       voice: {
         providerVoiceId: "male-qn-qingse"
       },
@@ -107,6 +151,7 @@ describe("core contracts", () => {
     };
 
     expect(request.output?.bitrate).toBe(128000);
+    expect(request.ssml).toContain("speak");
     expect(request.stream?.protocol).toBe("websocket");
   });
 
@@ -179,6 +224,7 @@ describe("core contracts", () => {
           supportsInstantVoiceClone: false,
           supportsVoiceCloneDelete: false
         },
+        vendorModels: [],
         operations: {}
       },
       canonicalRequest: {

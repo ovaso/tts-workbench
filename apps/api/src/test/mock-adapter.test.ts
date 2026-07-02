@@ -44,14 +44,18 @@ describe("MockTTSAdapter", () => {
         value: 550
       }
     ]);
-    expect(plan.mappingReport.approximations).toEqual([
+    expect(plan.mappingReport.approximations).toEqual([]);
+    expect(plan.mappingReport.ignoredFields).toEqual([
       {
         field: "output.sampleRateHz",
-        requestedValue: 22050,
-        actualValue: 24000,
-        reason: "The requested sample rate was mapped to the nearest supported mock rate."
+        reason: "Model 'mock-tts-v1' does not support sample rate '22050'. The vendor default is used."
+      },
+      {
+        field: "controls.volume",
+        reason: "The mock adapter records this control but does not alter waveform gain."
       }
     ]);
+    expect(plan.vendorRequest.sampleRateHz).toBe(24000);
   });
 
   it("emits a wav provider result for a sync plan", async () => {

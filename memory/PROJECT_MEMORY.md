@@ -5,7 +5,7 @@
 - 已建立 pnpm workspace Skeleton。
 - 根目录包含 `package.json`、`pnpm-workspace.yaml`、`tsconfig.base.json`、`.node-version`、`.gitignore`。
 - `packages/core` 已建立共享契约层，包含 operation、request、result、capability、vendor extension、mapping report、adapter contract、error model。
-- `packages/core` 已吸收 `CORE_DESIGN.md` 中适合当前阶段的能力维度：扩展音频格式、stream 偏好、voice clone consent/reference audio 元数据、细化 capability、显式 vendor feature flags、plan-first clone/delete adapter contract。
+- `packages/core` 已吸收 `CORE_DESIGN.md` 中适合当前阶段的能力维度：扩展音频格式、stream 偏好、voice clone consent/reference audio 元数据、细化 capability、显式 vendor feature flags、vendor model capabilities、plan-first clone/delete adapter contract。
 - `apps/api` 已建立 Fastify + TypeScript 后端骨架，并按当前架构边界使用 Vite Vanilla 模式作为默认 build 工具。
 - `apps/api` 已包含 mock adapter、adapter registry、TTS facade、run archive、health/provider/sync/runs routes。
 - `apps/web` 已建立 Vue 3 + Vite + TypeScript + Pinia + VueRouter + Vuetify 控制台骨架。
@@ -36,6 +36,9 @@
   - Web API client test
 - 已为 core 契约补充测试，覆盖 richer audio output、stream preferences、reference audio format、plan-first clone execution、stream event lifecycle。
 - Adapter capability 现在必须声明 `vendorFeatures`，用于表达厂商是否支持 HTTP TTS、流式 TTS、持久/即时音色复刻、删除复刻音色；这些是 vendor-owned facts，不由客户端请求决定，并随 adapter 实例注册进入 facade。
+- Adapter capability 现在必须声明 `vendorModels`，模型同样属于 vendor：每个模型声明支持的 operation、canonical model capability（如 text/SSML、输出格式、采样率、controls、clone 限制）以及模型专属 `vendorModelFeatureSchema`。
+- `TTSSyncRequest` 和 `TTSStreamRequest` 已补 `ssml?: string`；是否可用由选定 vendor model capability 决定。
+- Vendor/model capability 中的支持项只是静态事实，不等于本次请求开启；只有 request 中出现的字段才视为启用。request 未配置的选项使用 vendor/model default configuration；request 配置但当前 vendor/model 不支持的字段写入 mapping report 的 ignored fields，并使用厂商默认值。
 
 ## 验证结果
 
@@ -63,6 +66,7 @@
 - 扩展 run archive 类型和实现，使 voice clone 能保存 upload/clone/delete 等 vendor workflow steps。
 - 增加 streaming contract 对应的 route skeleton，但不要急于接真实 WebSocket 厂商。
 - 接入 MiniMax 前，先实现 MiniMax capability/extension schema fixture，并覆盖 HTTP TTS 的 plan/mapping 单元测试。
+- MiniMax adapter 应把 `speech-2.8-hd`、`speech-2.8-turbo`、`speech-2.6-*`、`speech-02-*` 等作为 `vendorModels` 内置声明；模型级特定能力如 `language_boost`、`pronunciation_dict`、字幕、voice_modify 等通过 `vendorModelFeatureSchema` 暴露。
 - 为 Web 增加更明确的 loading/empty/error 状态和 run detail 文件下载入口。
 
 ## 推荐内容

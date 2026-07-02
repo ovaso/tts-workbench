@@ -17,6 +17,78 @@ export function mockCapabilities(adapterVersion = MOCK_ADAPTER_VERSION): TTSCapa
       supportsInstantVoiceClone: false,
       supportsVoiceCloneDelete: false
     },
+    vendorModels: [
+      {
+        modelId: "mock-tts-v1",
+        displayName: "Mock TTS v1",
+        description: "Local sine-wave model used for facade and archive validation.",
+        defaultForOperations: ["tts.sync"],
+        canonicalCapabilities: {
+          supportsText: true,
+          supportsSSML: false,
+          supportedOperations: ["tts.sync"],
+          outputFormats: ["wav"],
+          sampleRatesHz: [16000, 24000, 48000],
+          maxTextChars: 10000,
+          canonicalControls: {
+            speed: {
+              support: "supported",
+              min: 0.5,
+              max: 2,
+              defaultValue: 1
+            },
+            pitch: {
+              support: "approximated",
+              min: -12,
+              max: 12,
+              defaultValue: 0
+            },
+            volume: {
+              support: "ignored",
+              defaultValue: 1
+            },
+            language: {
+              support: "supported",
+              values: ["en", "zh", "ja"]
+            }
+          }
+        },
+        defaultConfiguration: {
+          output: {
+            format: "wav",
+            sampleRateHz: 24000,
+            channels: 1
+          },
+          controls: {
+            speed: 1,
+            pitch: 0,
+            volume: 1,
+            language: "en"
+          }
+        },
+        vendorModelFeatureSchema: {
+          schemaVersion: "1.0.0",
+          title: "Mock TTS model features",
+          description: "Model-specific mock controls accepted through the vendor extension boundary.",
+          jsonSchema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              toneHz: {
+                type: "number",
+                minimum: 120,
+                maximum: 1200
+              },
+              durationMs: {
+                type: "number",
+                minimum: 200,
+                maximum: 3000
+              }
+            }
+          }
+        }
+      }
+    ],
     operations: {
       "tts.sync": {
         operation: "tts.sync",

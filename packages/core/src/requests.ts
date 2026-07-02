@@ -33,6 +33,7 @@ export interface TTSSyncRequest {
   operation: "tts.sync";
   providerId: string;
   text: string;
+  ssml?: string;
   model?: string;
   voice: TTSVoiceSelection;
   output?: TTSOutputPreferences;
@@ -45,6 +46,7 @@ export interface TTSStreamRequest {
   operation: "tts.stream";
   providerId: string;
   text: string;
+  ssml?: string;
   model?: string;
   voice: TTSVoiceSelection;
   output?: TTSOutputPreferences;

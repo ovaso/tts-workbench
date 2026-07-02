@@ -59,6 +59,39 @@ export interface TTSOperationCapability {
   notes?: string[];
 }
 
+export interface TTSVendorModelCanonicalCapabilities {
+  supportsText: boolean;
+  supportsSSML: boolean;
+  supportedOperations: TTSOperation[];
+  outputFormats?: TTSOutputFormat[];
+  outputChunkFormats?: TTSOutputFormat[];
+  sampleRatesHz?: number[];
+  maxTextChars?: number;
+  canonicalControls: Partial<Record<CanonicalControlName, CanonicalControlCapability>>;
+  voiceClone?: VoiceCloneCapability;
+}
+
+export interface TTSVendorModelDefaultConfiguration {
+  output?: {
+    format?: TTSOutputFormat;
+    sampleRateHz?: number;
+    bitrate?: number;
+    channels?: 1 | 2;
+  };
+  controls?: Partial<Record<CanonicalControlName, string | number | boolean>>;
+}
+
+export interface TTSVendorModel {
+  modelId: string;
+  displayName?: string;
+  description?: string;
+  defaultForOperations?: TTSOperation[];
+  canonicalCapabilities: TTSVendorModelCanonicalCapabilities;
+  defaultConfiguration?: TTSVendorModelDefaultConfiguration;
+  vendorModelFeatureSchema?: VendorExtensionSchema;
+  notes?: string[];
+}
+
 export interface TTSVendorFeatureFlags {
   supportsHttpTTS: boolean;
   supportsStreamingTTS: boolean;
@@ -72,5 +105,6 @@ export interface TTSCapabilities {
   providerName: string;
   adapterVersion: string;
   vendorFeatures: TTSVendorFeatureFlags;
+  vendorModels: TTSVendorModel[];
   operations: Partial<Record<TTSOperation, TTSOperationCapability>>;
 }

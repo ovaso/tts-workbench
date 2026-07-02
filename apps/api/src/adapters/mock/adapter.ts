@@ -9,6 +9,7 @@ import {
   type TTSAdapter,
   type TTSOperation,
   type TTSOperationRequest,
+  type TTSVendorModel,
   type TTSSyncPlan,
   type TTSSyncProviderResult,
   type TTSSyncRequest,
@@ -17,10 +18,8 @@ import {
   type VendorPayload
 } from "@tts-platform/core";
 import { createPlanId, createRunId } from "../../utils/ids";
-import { mockCapabilities, MOCK_ADAPTER_VERSION, MOCK_PROVIDER_ID } from "./capabilities";
+import { mockCapabilities, MOCK_ADAPTER_VERSION } from "./capabilities";
 import { mockExtensionSchema } from "./extension-schema";
-
-const SUPPORTED_SAMPLE_RATES = [16000, 24000, 48000] as const;
 
 export class MockTTSAdapter implements TTSAdapter {
   private readonly providerDefinition;
@@ -67,21 +66,39 @@ export class MockTTSAdapter implements TTSAdapter {
       );
     }
 
-    const requestedFormat = request.output?.format ?? "wav";
-    const actualFormat = requestedFormat === "wav" ? requestedFormat : "wav";
-    const requestedSampleRate = request.output?.sampleRateHz ?? 24000;
-    const actualSampleRate = nearestSampleRate(requestedSampleRate);
     const voice = request.voice.providerVoiceId ?? request.voice.voiceId ?? "mock-default-voice";
-    const model = request.model ?? "mock-tts-v1";
+    const model = request.model ?? defaultModelId(capabilitySnapshot.vendorModels, request.operation);
+    const modelDefinition = capabilitySnapshot.vendorModels.find((candidate) => candidate.modelId === model);
+    if (modelDefinition === undefined) {
+      throw new TTSError(`Mock model '${model}' was not found.`, "invalid_request", 400);
+    }
+    const defaultOutput = modelDefinition.defaultConfiguration?.output ?? {};
+    const defaultControls = modelDefinition.defaultConfiguration?.controls ?? {};
+    const supportedFormats = modelDefinition.canonicalCapabilities.outputFormats ?? [];
+    const supportedSampleRates = modelDefinition.canonicalCapabilities.sampleRatesHz ?? [];
+    const actualFormat =
+      request.output?.format !== undefined && supportedFormats.includes(request.output.format)
+        ? request.output.format
+        : defaultOutput.format ?? "wav";
+    const actualSampleRate =
+      request.output?.sampleRateHz !== undefined &&
+      supportedSampleRates.includes(request.output.sampleRateHz)
+        ? request.output.sampleRateHz
+        : defaultOutput.sampleRateHz ?? 24000;
 
     const appliedCanonicalFields: AppliedCanonicalField[] = [
       applied("text", request.text, "input.text"),
-      applied("model", model, "model"),
       applied("voice", voice, "voice")
     ];
 
+    if (request.model !== undefined) {
+      appliedCanonicalFields.push(applied("model", model, "model"));
+    }
     if (request.voice.language !== undefined) {
       appliedCanonicalFields.push(applied("voice.language", request.voice.language, "language"));
+    }
+    if (request.ssml !== undefined && modelDefinition.canonicalCapabilities.supportsSSML) {
+      appliedCanonicalFields.push(applied("ssml", request.ssml, "input.ssml"));
     }
     if (request.controls?.speed !== undefined) {
       appliedCanonicalFields.push(applied("controls.speed", request.controls.speed, "speed"));
@@ -89,29 +106,46 @@ export class MockTTSAdapter implements TTSAdapter {
     if (request.controls?.pitch !== undefined) {
       appliedCanonicalFields.push(applied("controls.pitch", request.controls.pitch, "pitchSemitones"));
     }
-    if (request.controls?.volume !== undefined) {
-      appliedCanonicalFields.push(applied("controls.volume", request.controls.volume, "volume"));
+    if (request.output?.format !== undefined && supportedFormats.includes(request.output.format)) {
+      appliedCanonicalFields.push(applied("output.format", request.output.format, "format"));
+    }
+    if (
+      request.output?.sampleRateHz !== undefined &&
+      supportedSampleRates.includes(request.output.sampleRateHz)
+    ) {
+      appliedCanonicalFields.push(applied("output.sampleRateHz", request.output.sampleRateHz, "sampleRateHz"));
     }
 
     const approximations: Approximation[] = [];
-    if (actualFormat !== requestedFormat) {
-      approximations.push({
+    const ignoredFields: IgnoredField[] = [];
+    if (request.output?.format !== undefined && !supportedFormats.includes(request.output.format)) {
+      ignoredFields.push({
         field: "output.format",
-        requestedValue: requestedFormat,
-        actualValue: actualFormat,
-        reason: "The mock adapter only emits wav audio."
+        reason: `Model '${model}' does not support output format '${request.output.format}'. The vendor default is used.`
       });
     }
-    if (actualSampleRate !== requestedSampleRate) {
-      approximations.push({
+    if (
+      request.output?.sampleRateHz !== undefined &&
+      !supportedSampleRates.includes(request.output.sampleRateHz)
+    ) {
+      ignoredFields.push({
         field: "output.sampleRateHz",
-        requestedValue: requestedSampleRate,
-        actualValue: actualSampleRate,
-        reason: "The requested sample rate was mapped to the nearest supported mock rate."
+        reason: `Model '${model}' does not support sample rate '${request.output.sampleRateHz}'. The vendor default is used.`
+      });
+    }
+    if (request.output?.bitrate !== undefined) {
+      ignoredFields.push({
+        field: "output.bitrate",
+        reason: `Model '${model}' does not expose bitrate control. The vendor default is used.`
+      });
+    }
+    if (request.output?.channels !== undefined) {
+      ignoredFields.push({
+        field: "output.channels",
+        reason: `Model '${model}' does not expose channel control. The vendor default is used.`
       });
     }
 
-    const ignoredFields: IgnoredField[] = [];
     const appliedVendorExtensions: AppliedVendorExtension[] = [];
     const vendorRequest: VendorPayload = {
       input: {
@@ -119,17 +153,35 @@ export class MockTTSAdapter implements TTSAdapter {
       },
       model,
       voice,
-      language: request.voice.language ?? "en",
+      language: request.voice.language ?? defaultControls.language ?? "en",
       format: actualFormat,
       sampleRateHz: actualSampleRate,
-      speed: request.controls?.speed ?? 1,
-      pitchSemitones: request.controls?.pitch ?? 0
+      speed: request.controls?.speed ?? defaultControls.speed ?? 1,
+      pitchSemitones: request.controls?.pitch ?? defaultControls.pitch ?? 0
     };
 
     if (request.controls?.volume !== undefined) {
       ignoredFields.push({
         field: "controls.volume",
         reason: "The mock adapter records this control but does not alter waveform gain."
+      });
+    }
+    if (request.controls?.emotion !== undefined) {
+      ignoredFields.push({
+        field: "controls.emotion",
+        reason: `Model '${model}' does not support emotion control.`
+      });
+    }
+    if (request.controls?.style !== undefined) {
+      ignoredFields.push({
+        field: "controls.style",
+        reason: `Model '${model}' does not support style control.`
+      });
+    }
+    if (request.ssml !== undefined && !modelDefinition.canonicalCapabilities.supportsSSML) {
+      ignoredFields.push({
+        field: "ssml",
+        reason: `Model '${model}' does not support SSML.`
       });
     }
 
@@ -215,11 +267,8 @@ function applied(field: string, value: JsonValue, vendorField: string): AppliedC
   };
 }
 
-function nearestSampleRate(requested: number): number {
-  const first = SUPPORTED_SAMPLE_RATES[0];
-  return SUPPORTED_SAMPLE_RATES.reduce((best, candidate) => {
-    return Math.abs(candidate - requested) < Math.abs(best - requested) ? candidate : best;
-  }, first);
+function defaultModelId(models: TTSVendorModel[], operation: TTSOperation): string {
+  return models.find((model) => model.defaultForOperations?.includes(operation))?.modelId ?? models[0]?.modelId ?? "";
 }
 
 function numberFromVendor(value: unknown, fallback: number): number {

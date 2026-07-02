@@ -32,6 +32,9 @@ function parseSyncRequest(body: unknown): TTSSyncRequest {
   if (typeof input.model === "string") {
     request.model = input.model;
   }
+  if (typeof input.ssml === "string") {
+    request.ssml = input.ssml;
+  }
   const output = parseOutput(input.output);
   if (output !== undefined) {
     request.output = output;
