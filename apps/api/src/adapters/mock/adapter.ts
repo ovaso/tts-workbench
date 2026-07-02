@@ -17,17 +17,25 @@ import {
   type VendorPayload
 } from "@tts-platform/core";
 import { createPlanId, createRunId } from "../../utils/ids";
-import { mockCapabilities, MOCK_PROVIDER_ID } from "./capabilities";
+import { mockCapabilities, MOCK_ADAPTER_VERSION, MOCK_PROVIDER_ID } from "./capabilities";
 import { mockExtensionSchema } from "./extension-schema";
 
 const SUPPORTED_SAMPLE_RATES = [16000, 24000, 48000] as const;
 
 export class MockTTSAdapter implements TTSAdapter {
-  readonly providerId = MOCK_PROVIDER_ID;
-  readonly adapterVersion = "0.1.0";
+  private readonly providerDefinition;
+
+  readonly providerId;
+  readonly adapterVersion;
+
+  constructor(providerDefinition = mockCapabilities(MOCK_ADAPTER_VERSION)) {
+    this.providerDefinition = providerDefinition;
+    this.providerId = providerDefinition.providerId;
+    this.adapterVersion = providerDefinition.adapterVersion;
+  }
 
   capabilities() {
-    return mockCapabilities(this.adapterVersion);
+    return this.providerDefinition;
   }
 
   extensionSchema(operation: TTSOperation): VendorExtensionSchema {

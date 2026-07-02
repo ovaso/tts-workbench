@@ -3,15 +3,25 @@ import { mockExtensionSchema } from "./extension-schema";
 
 export const MOCK_PROVIDER_ID = "mock";
 
-export function mockCapabilities(adapterVersion: string): TTSCapabilities {
+export const MOCK_ADAPTER_VERSION = "0.1.0";
+
+export function mockCapabilities(adapterVersion = MOCK_ADAPTER_VERSION): TTSCapabilities {
   return {
     providerId: MOCK_PROVIDER_ID,
     providerName: "Local Mock TTS",
     adapterVersion,
+    vendorFeatures: {
+      supportsHttpTTS: true,
+      supportsStreamingTTS: false,
+      supportsPersistentVoiceClone: false,
+      supportsInstantVoiceClone: false,
+      supportsVoiceCloneDelete: false
+    },
     operations: {
       "tts.sync": {
         operation: "tts.sync",
         supported: true,
+        transportProtocols: ["https"],
         outputFormats: ["wav"],
         sampleRatesHz: [16000, 24000, 48000],
         maxTextChars: 10000,

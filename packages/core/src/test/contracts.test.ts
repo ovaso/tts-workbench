@@ -53,6 +53,38 @@ describe("core contracts", () => {
     expect(request.vendor?.extensions?.mock?.params.toneHz).toBe(440);
   });
 
+  it("requires adapters to declare vendor-owned feature flags", () => {
+    const capabilities = {
+      providerId: "minimax",
+      providerName: "MiniMax",
+      adapterVersion: "0.1.0",
+      vendorFeatures: {
+        supportsHttpTTS: true,
+        supportsStreamingTTS: true,
+        supportsPersistentVoiceClone: true,
+        supportsInstantVoiceClone: false,
+        supportsVoiceCloneDelete: true
+      },
+      operations: {
+        "tts.sync": {
+          operation: "tts.sync",
+          supported: true,
+          transportProtocols: ["https"],
+          canonicalControls: {}
+        },
+        "tts.stream": {
+          operation: "tts.stream",
+          supported: true,
+          transportProtocols: ["websocket"],
+          canonicalControls: {}
+        }
+      }
+    } satisfies import("../index").TTSCapabilities;
+
+    expect(capabilities.vendorFeatures.supportsHttpTTS).toBe(true);
+    expect(capabilities.operations["tts.sync"]?.transportProtocols).toEqual(["https"]);
+  });
+
   it("models richer audio output and stream preferences without vendor-specific fields", () => {
     const request: TTSStreamRequest = {
       operation: "tts.stream",
@@ -140,6 +172,13 @@ describe("core contracts", () => {
         providerId: "planned-clone",
         providerName: "Planned Clone",
         adapterVersion: "0.0.0",
+        vendorFeatures: {
+          supportsHttpTTS: false,
+          supportsStreamingTTS: false,
+          supportsPersistentVoiceClone: true,
+          supportsInstantVoiceClone: false,
+          supportsVoiceCloneDelete: false
+        },
         operations: {}
       },
       canonicalRequest: {

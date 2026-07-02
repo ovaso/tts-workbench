@@ -9,6 +9,8 @@ export type TTSOutputFormat = TTSAudioOutputFormat;
 
 export type TTSStreamProtocol = "websocket" | "sse" | "http_chunk";
 
+export type TTSTransportProtocol = "https" | TTSStreamProtocol;
+
 export type TTSStreamInputMode = "text_once" | "text_incremental";
 
 export type CapabilitySupport = "supported" | "approximated" | "ignored" | "unsupported";
@@ -43,7 +45,7 @@ export interface VoiceCloneCapability {
 export interface TTSOperationCapability {
   operation: TTSOperation;
   supported: boolean;
-  transportProtocols?: TTSStreamProtocol[];
+  transportProtocols?: TTSTransportProtocol[];
   inputModes?: TTSStreamInputMode[];
   outputFormats?: TTSOutputFormat[];
   outputChunkFormats?: TTSOutputFormat[];
@@ -57,9 +59,18 @@ export interface TTSOperationCapability {
   notes?: string[];
 }
 
+export interface TTSVendorFeatureFlags {
+  supportsHttpTTS: boolean;
+  supportsStreamingTTS: boolean;
+  supportsPersistentVoiceClone: boolean;
+  supportsInstantVoiceClone: boolean;
+  supportsVoiceCloneDelete: boolean;
+}
+
 export interface TTSCapabilities {
   providerId: string;
   providerName: string;
   adapterVersion: string;
+  vendorFeatures: TTSVendorFeatureFlags;
   operations: Partial<Record<TTSOperation, TTSOperationCapability>>;
 }

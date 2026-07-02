@@ -5,7 +5,7 @@
 - 已建立 pnpm workspace Skeleton。
 - 根目录包含 `package.json`、`pnpm-workspace.yaml`、`tsconfig.base.json`、`.node-version`、`.gitignore`。
 - `packages/core` 已建立共享契约层，包含 operation、request、result、capability、vendor extension、mapping report、adapter contract、error model。
-- `packages/core` 已吸收 `CORE_DESIGN.md` 中适合当前阶段的能力维度：扩展音频格式、stream 偏好、voice clone consent/reference audio 元数据、细化 capability、plan-first clone/delete adapter contract。
+- `packages/core` 已吸收 `CORE_DESIGN.md` 中适合当前阶段的能力维度：扩展音频格式、stream 偏好、voice clone consent/reference audio 元数据、细化 capability、显式 vendor feature flags、plan-first clone/delete adapter contract。
 - `apps/api` 已建立 Fastify + TypeScript 后端骨架，并按当前架构边界使用 Vite Vanilla 模式作为默认 build 工具。
 - `apps/api` 已包含 mock adapter、adapter registry、TTS facade、run archive、health/provider/sync/runs routes。
 - `apps/web` 已建立 Vue 3 + Vite + TypeScript + Pinia + VueRouter + Vuetify 控制台骨架。
@@ -35,6 +35,7 @@
   - API route test
   - Web API client test
 - 已为 core 契约补充测试，覆盖 richer audio output、stream preferences、reference audio format、plan-first clone execution、stream event lifecycle。
+- Adapter capability 现在必须声明 `vendorFeatures`，用于表达厂商是否支持 HTTP TTS、流式 TTS、持久/即时音色复刻、删除复刻音色；这些是 vendor-owned facts，不由客户端请求决定，并随 adapter 实例注册进入 facade。
 
 ## 验证结果
 
