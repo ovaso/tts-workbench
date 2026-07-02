@@ -10,7 +10,8 @@ describe("api app", () => {
 
   beforeEach(async () => {
     app = await buildApp({
-      dataRoot: await mkdtemp(path.join(os.tmpdir(), "tts-api-"))
+      dataRoot: await mkdtemp(path.join(os.tmpdir(), "tts-api-")),
+      loadEnv: false
     });
   });
 

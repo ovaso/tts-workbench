@@ -5,6 +5,7 @@ import { MiniMaxTTSAdapter } from "./adapters/minimax/adapter";
 import { MockTTSAdapter } from "./adapters/mock/adapter";
 import { AdapterRegistry } from "./facade/adapter-registry";
 import { TTSFacade } from "./facade/tts-facade";
+import { loadEnvFiles } from "./config/env";
 import { registerHealthRoutes } from "./routes/health";
 import { registerProviderRoutes } from "./routes/providers";
 import { registerRunRoutes } from "./routes/runs";
@@ -15,9 +16,14 @@ import { InMemoryVoiceRegistry } from "./storage/voice-registry";
 export interface BuildAppOptions {
   dataRoot?: string;
   logger?: boolean;
+  loadEnv?: boolean;
 }
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyInstance> {
+  if (options.loadEnv ?? true) {
+    loadEnvFiles();
+  }
+
   const app = fastify({
     logger: options.logger ?? false
   });

@@ -148,6 +148,8 @@
 }
 ```
 
+`MINIMAX_API_KEY` 从后端进程环境变量读取。项目支持根目录 `.env`、`.env.local`、`apps/api/.env`、`apps/api/.env.local`，实际 env 文件已通过 `.gitignore` 排除。
+
 ### Vendor HTTP Response
 
 ```json
