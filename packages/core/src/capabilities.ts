@@ -72,6 +72,9 @@ export interface TTSVendorModelCanonicalCapabilities {
 }
 
 export interface TTSVendorModelDefaultConfiguration {
+  voice?: {
+    providerVoiceId?: string;
+  };
   output?: {
     format?: TTSOutputFormat;
     sampleRateHz?: number;

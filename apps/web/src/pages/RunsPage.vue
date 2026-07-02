@@ -24,7 +24,7 @@
           <tr v-for="run in runs" :key="run.runId">
             <td>{{ run.runId }}</td>
             <td>{{ run.providerId }}</td>
-            <td>{{ run.createdAt }}</td>
+            <td>{{ formatLocalDateTime(run.createdAt) }}</td>
             <td>{{ run.audio.format }} · {{ run.audio.sampleRateHz }} Hz</td>
             <td class="text-right">
               <v-btn
@@ -45,6 +45,7 @@
 import type { TTSSyncResult } from "@tts-platform/core";
 import { onMounted, ref } from "vue";
 import { listRuns } from "../api/runs";
+import { formatLocalDateTime } from "../utils/time";
 
 const runs = ref<TTSSyncResult[]>([]);
 const loading = ref(false);

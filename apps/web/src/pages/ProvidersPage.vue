@@ -20,7 +20,7 @@
             </tr>
           </thead>
           <tbody>
-            <tr v-for="provider in store.providers" :key="provider.providerId">
+            <tr v-for="provider in visibleProviders" :key="provider.providerId">
               <td>{{ provider.providerName }}</td>
               <td>{{ provider.adapterVersion }}</td>
               <td class="text-right">
@@ -52,6 +52,11 @@ import { useProvidersStore } from "../stores/providers";
 const store = useProvidersStore();
 const selectedProviderId = ref("");
 
+// visibleProviders: 无入参；功能是隐藏仅用于本地测试闭环的 mock provider。
+const visibleProviders = computed(() =>
+  store.providers.filter((provider) => provider.providerId !== "mock")
+);
+
 const selectedCapabilities = computed(() => {
   if (selectedProviderId.value.length === 0) {
     return undefined;
@@ -61,8 +66,8 @@ const selectedCapabilities = computed(() => {
 
 async function reload() {
   await store.loadProviders();
-  if (selectedProviderId.value.length === 0 && store.providers[0] !== undefined) {
-    await selectProvider(store.providers[0].providerId);
+  if (selectedProviderId.value.length === 0 && visibleProviders.value[0] !== undefined) {
+    await selectProvider(visibleProviders.value[0].providerId);
   }
 }
 

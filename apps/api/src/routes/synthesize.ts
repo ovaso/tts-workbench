@@ -57,17 +57,14 @@ function parseSyncRequest(body: unknown): TTSSyncRequest {
 function parseVoice(value: unknown): TTSSyncRequest["voice"] {
   const voice = requireObject(value, "voice");
   const parsed: TTSSyncRequest["voice"] = {};
-  if (typeof voice.voiceId === "string") {
+  if (typeof voice.voiceId === "string" && voice.voiceId.trim().length > 0) {
     parsed.voiceId = voice.voiceId;
   }
-  if (typeof voice.providerVoiceId === "string") {
+  if (typeof voice.providerVoiceId === "string" && voice.providerVoiceId.trim().length > 0) {
     parsed.providerVoiceId = voice.providerVoiceId;
   }
-  if (typeof voice.language === "string") {
+  if (typeof voice.language === "string" && voice.language.trim().length > 0) {
     parsed.language = voice.language;
-  }
-  if (parsed.voiceId === undefined && parsed.providerVoiceId === undefined) {
-    throw new TTSError("voice.voiceId or voice.providerVoiceId is required.", "invalid_request", 400);
   }
   return parsed;
 }

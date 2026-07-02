@@ -73,9 +73,7 @@
   "providerId": "minimax",
   "text": "今天是不是很开心呀(laughs)，当然了！",
   "model": "speech-2.8-hd",
-  "voice": {
-    "providerVoiceId": "male-qn-qingse"
-  },
+  "voice": {},
   "output": {
     "format": "mp3",
     "sampleRateHz": 32000,
@@ -124,7 +122,7 @@
     "text": "今天是不是很开心呀(laughs)，当然了！",
     "stream": false,
     "voice_setting": {
-      "voice_id": "male-qn-qingse",
+      "voice_id": "Chinese (Mandarin)_Gentleman",
       "speed": 1,
       "vol": 1,
       "pitch": 0,
@@ -195,6 +193,7 @@ data/runs/{runId}/
 - `text` -> `text`
 - `model` -> `model`; 未配置时使用 `speech-2.8-hd`
 - `voice.providerVoiceId || voice.voiceId` -> `voice_setting.voice_id`
+- voice 未配置时使用模型默认音色 `Chinese (Mandarin)_Gentleman`
 - `controls.speed` -> `voice_setting.speed`
 - `controls.volume` -> `voice_setting.vol`
 - `controls.pitch` -> `voice_setting.pitch`
@@ -255,7 +254,7 @@ sequenceDiagram
   "event": "task_start",
   "model": "speech-2.8-hd",
   "voice_setting": {
-    "voice_id": "male-qn-qingse",
+    "voice_id": "Chinese (Mandarin)_Gentleman",
     "speed": 1,
     "vol": 1,
     "pitch": 0,

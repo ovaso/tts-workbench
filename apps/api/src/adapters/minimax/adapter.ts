@@ -100,6 +100,7 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
     const appliedVendorExtensions: AppliedVendorExtension[] = [];
     const defaultOutput = model.defaultConfiguration?.output ?? {};
     const defaultControls = model.defaultConfiguration?.controls ?? {};
+    const defaultVoice = model.defaultConfiguration?.voice ?? {};
     const supportedFormats = model.canonicalCapabilities.outputFormats ?? [];
     const supportedSampleRates = model.canonicalCapabilities.sampleRatesHz ?? [];
     const requestedFormat = request.output?.format;
@@ -117,14 +118,21 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
         : defaultOutput.sampleRateHz ?? 32000;
     const actualBitrate = requestedBitrate ?? defaultOutput.bitrate ?? 128000;
     const actualChannels = requestedChannels ?? defaultOutput.channels ?? 1;
-    const voiceId = request.voice.providerVoiceId ?? request.voice.voiceId;
+    const requestedVoice = request.voice.providerVoiceId ?? request.voice.voiceId;
+    const voiceId = requestedVoice ?? defaultVoice.providerVoiceId;
     if (voiceId === undefined) {
-      throw new TTSError("MiniMax requires voice.voiceId or voice.providerVoiceId.", "invalid_request", 400);
+      throw new TTSError(
+        "MiniMax requires voice.voiceId/providerVoiceId or a model default voice.",
+        "invalid_request",
+        400
+      );
     }
 
     // appliedCanonicalFields 只记录本次请求显式启用并成功映射的 canonical 字段。
     appliedCanonicalFields.push(applied("text", request.text, "text"));
-    appliedCanonicalFields.push(applied("voice", voiceId, "voice_setting.voice_id"));
+    if (requestedVoice !== undefined) {
+      appliedCanonicalFields.push(applied("voice", requestedVoice, "voice_setting.voice_id"));
+    }
     if (request.model !== undefined) {
       appliedCanonicalFields.push(applied("model", modelId, "model"));
     }
@@ -168,12 +176,6 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
         reason: `MiniMax model '${modelId}' does not expose canonical style control.`
       });
     }
-    if (request.voice.language !== undefined) {
-      ignoredFields.push({
-        field: "voice.language",
-        reason: "MiniMax language selection is exposed through vendor extension language_boost."
-      });
-    }
     if (requestedFormat !== undefined && !supportedFormats.includes(requestedFormat)) {
       ignoredFields.push({
         field: "output.format",
@@ -204,8 +206,13 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
         bitrate: actualBitrate,
         format: actualFormat,
         channel: actualChannels
-      }
+      },
+      ...(request.voice.language === undefined ? {} : { language_boost: request.voice.language })
     };
+
+    if (request.voice.language !== undefined) {
+      appliedCanonicalFields.push(applied("voice.language", request.voice.language, "language_boost"));
+    }
 
     // canonical_only 下必须忽略所有 vendor extension，以保证 benchmark 公平性。
     if (extension !== undefined && directiveMode === "canonical_only") {

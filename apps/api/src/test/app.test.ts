@@ -95,4 +95,19 @@ describe("api app", () => {
       value: 440
     });
   });
+
+  it("accepts an empty voice object so adapters can use provider defaults", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/tts/sync",
+      payload: {
+        providerId: "mock",
+        text: "hello",
+        voice: {}
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().audio.fileName).toBe("audio.wav");
+  });
 });

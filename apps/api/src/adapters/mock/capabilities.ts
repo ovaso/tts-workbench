@@ -54,6 +54,9 @@ export function mockCapabilities(adapterVersion = MOCK_ADAPTER_VERSION): TTSCapa
           }
         },
         defaultConfiguration: {
+          voice: {
+            providerVoiceId: "mock-default-voice"
+          },
           output: {
             format: "wav",
             sampleRateHz: 24000,

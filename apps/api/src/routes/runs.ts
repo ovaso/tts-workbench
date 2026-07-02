@@ -17,7 +17,27 @@ export async function registerRunRoutes(
 
   app.get<{ Params: { runId: string } }>("/v1/runs/:runId/audio", async (request, reply) => {
     const { stream, filePath } = await archive.audioStream(request.params.runId);
-    const contentType = filePath.endsWith(".wav") ? "audio/wav" : "application/octet-stream";
+    const contentType = audioContentType(filePath);
     return reply.type(contentType).send(stream);
   });
+}
+
+// audioContentType: 入参为音频文件路径；功能是为浏览器播放器返回正确的音频 MIME 类型。
+export function audioContentType(filePath: string): string {
+  if (filePath.endsWith(".wav")) {
+    return "audio/wav";
+  }
+  if (filePath.endsWith(".mp3")) {
+    return "audio/mpeg";
+  }
+  if (filePath.endsWith(".ogg")) {
+    return "audio/ogg";
+  }
+  if (filePath.endsWith(".flac")) {
+    return "audio/flac";
+  }
+  if (filePath.endsWith(".pcm")) {
+    return "audio/L16";
+  }
+  return "application/octet-stream";
 }

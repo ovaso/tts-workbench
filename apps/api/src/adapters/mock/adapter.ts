@@ -66,7 +66,6 @@ export class MockTTSAdapter implements TTSAdapter {
       );
     }
 
-    const voice = request.voice.providerVoiceId ?? request.voice.voiceId ?? "mock-default-voice";
     const model = request.model ?? defaultModelId(capabilitySnapshot.vendorModels, request.operation);
     const modelDefinition = capabilitySnapshot.vendorModels.find((candidate) => candidate.modelId === model);
     if (modelDefinition === undefined) {
@@ -74,6 +73,7 @@ export class MockTTSAdapter implements TTSAdapter {
     }
     const defaultOutput = modelDefinition.defaultConfiguration?.output ?? {};
     const defaultControls = modelDefinition.defaultConfiguration?.controls ?? {};
+    const defaultVoice = modelDefinition.defaultConfiguration?.voice ?? {};
     const supportedFormats = modelDefinition.canonicalCapabilities.outputFormats ?? [];
     const supportedSampleRates = modelDefinition.canonicalCapabilities.sampleRatesHz ?? [];
     const actualFormat =
@@ -85,12 +85,16 @@ export class MockTTSAdapter implements TTSAdapter {
       supportedSampleRates.includes(request.output.sampleRateHz)
         ? request.output.sampleRateHz
         : defaultOutput.sampleRateHz ?? 24000;
+    const requestedVoice = request.voice.providerVoiceId ?? request.voice.voiceId;
+    const voice = requestedVoice ?? defaultVoice.providerVoiceId ?? "mock-default-voice";
 
     const appliedCanonicalFields: AppliedCanonicalField[] = [
-      applied("text", request.text, "input.text"),
-      applied("voice", voice, "voice")
+      applied("text", request.text, "input.text")
     ];
 
+    if (requestedVoice !== undefined) {
+      appliedCanonicalFields.push(applied("voice", requestedVoice, "voice"));
+    }
     if (request.model !== undefined) {
       appliedCanonicalFields.push(applied("model", model, "model"));
     }

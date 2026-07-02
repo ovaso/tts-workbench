@@ -3,6 +3,7 @@ import { minimaxSyncExtensionSchema, minimaxExtensionSchema } from "./extension-
 
 export const MINIMAX_PROVIDER_ID = "minimax";
 export const MINIMAX_ADAPTER_VERSION = "0.1.0";
+export const MINIMAX_DEFAULT_VOICE_ID = "Chinese (Mandarin)_Gentleman";
 
 // speechModels: MiniMax 文档声明的 TTS 模型常量；模型属于 vendor adapter 的静态定义。
 const speechModels = [
@@ -86,6 +87,9 @@ function minimaxSpeechModel(modelId: (typeof speechModels)[number], displayName 
       }
     },
     defaultConfiguration: {
+      voice: {
+        providerVoiceId: MINIMAX_DEFAULT_VOICE_ID
+      },
       output: {
         format: "mp3",
         sampleRateHz: 32000,

@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -34,5 +34,21 @@ describe("loadEnvFiles", () => {
     expect(process.env.MINIMAX_API_KEY).toBe("existing-key");
     expect(process.env.PORT).toBe("4100");
     expect(process.env.QUOTED_VALUE).toBe("hello\nworld");
+  });
+
+  it("loads root env when the api package is the current working directory", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "tts-env-root-"));
+    await writeFile(path.join(root, "pnpm-workspace.yaml"), "packages: []\n");
+    await mkdir(path.join(root, "apps", "api"), {
+      recursive: true
+    });
+    await writeFile(path.join(root, ".env"), "MINIMAX_API_KEY=root-key\n");
+
+    const result = loadEnvFiles({
+      cwd: path.join(root, "apps", "api")
+    });
+
+    expect(result.loadedFiles).toContain(path.join(root, ".env"));
+    expect(process.env.MINIMAX_API_KEY).toBe("root-key");
   });
 });

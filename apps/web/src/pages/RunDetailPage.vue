@@ -10,6 +10,9 @@
     </v-alert>
 
     <div v-if="detail" class="work-panel pa-4">
+      <div class="run-meta mb-4">
+        Created {{ formatLocalDateTime(detail.result.createdAt) }}
+      </div>
       <AudioPlayer v-if="detail.result.audio.url" class="mb-4" :src="detail.result.audio.url" />
       <v-tabs v-model="tab" density="comfortable">
         <v-tab value="request">Request</v-tab>
@@ -52,6 +55,7 @@ import { onMounted, ref } from "vue";
 import { getRun, type RunDetail } from "../api/runs";
 import AudioPlayer from "../components/AudioPlayer.vue";
 import JsonViewer from "../components/JsonViewer.vue";
+import { formatLocalDateTime } from "../utils/time";
 
 const props = defineProps<{
   runId: string;
@@ -76,3 +80,10 @@ async function load() {
 
 onMounted(load);
 </script>
+
+<style scoped>
+.run-meta {
+  color: rgb(var(--v-theme-on-surface-variant));
+  font-size: 0.875rem;
+}
+</style>

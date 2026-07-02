@@ -2,9 +2,7 @@
   "providerId": "minimax",
   "text": "今天是不是很开心呀(laughs)，当然了！",
   "model": "speech-2.8-hd",
-  "voice": {
-    "providerVoiceId": "male-qn-qingse"
-  },
+  "voice": {},
   "output": {
     "format": "mp3",
     "sampleRateHz": 32000,

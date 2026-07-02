@@ -25,10 +25,13 @@ const emit = defineEmits<{
   "update:modelValue": [value: string];
 }>();
 
+// items: 无入参；功能是生成页面可选 provider，隐藏仅用于本地闭环验证的 mock provider。
 const items = computed(() =>
-  props.providers.map((provider) => ({
-    title: `${provider.providerName} (${provider.providerId})`,
-    value: provider.providerId
-  }))
+  props.providers
+    .filter((provider) => provider.providerId !== "mock")
+    .map((provider) => ({
+      title: `${provider.providerName} (${provider.providerId})`,
+      value: provider.providerId
+    }))
 );
 </script>

@@ -10,15 +10,22 @@ export interface LoadEnvFilesResult {
   loadedFiles: string[];
 }
 
-const ENV_FILE_NAMES = [".env", ".env.local", "apps/api/.env", "apps/api/.env.local"] as const;
+const ROOT_ENV_FILE_NAMES = [".env", ".env.local"] as const;
+const API_ENV_FILE_NAMES = ["apps/api/.env", "apps/api/.env.local"] as const;
 
-// loadEnvFiles: 入参为当前工作目录和覆盖策略；功能是按固定顺序读取本地 env 文件并写入 process.env。
+// loadEnvFiles: 入参为当前工作目录和覆盖策略；功能是从 workspace 根和 API 包目录读取 env 文件并写入 process.env。
 export function loadEnvFiles(options: LoadEnvFilesOptions = {}): LoadEnvFilesResult {
   const cwd = options.cwd ?? process.cwd();
+  const workspaceRoot = findWorkspaceRoot(cwd);
   const loadedFiles: string[] = [];
+  const candidateFiles = [
+    ...ROOT_ENV_FILE_NAMES.map((fileName) => path.resolve(workspaceRoot, fileName)),
+    ...API_ENV_FILE_NAMES.map((fileName) => path.resolve(workspaceRoot, fileName)),
+    ...ROOT_ENV_FILE_NAMES.map((fileName) => path.resolve(cwd, fileName))
+  ];
+  const uniqueCandidateFiles = [...new Set(candidateFiles)];
 
-  for (const fileName of ENV_FILE_NAMES) {
-    const filePath = path.resolve(cwd, fileName);
+  for (const filePath of uniqueCandidateFiles) {
     if (!existsSync(filePath)) {
       continue;
     }
@@ -31,6 +38,22 @@ export function loadEnvFiles(options: LoadEnvFilesOptions = {}): LoadEnvFilesRes
   return {
     loadedFiles
   };
+}
+
+// findWorkspaceRoot: 入参为起始目录；向上查找 pnpm-workspace.yaml，找不到时回退到起始目录。
+function findWorkspaceRoot(startDirectory: string): string {
+  let current = path.resolve(startDirectory);
+  while (true) {
+    if (existsSync(path.join(current, "pnpm-workspace.yaml"))) {
+      return current;
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return path.resolve(startDirectory);
+    }
+    current = parent;
+  }
 }
 
 // applyEnvContent: 入参为 env 文件内容和覆盖策略；功能是解析 KEY=VALUE 行并写入 process.env。

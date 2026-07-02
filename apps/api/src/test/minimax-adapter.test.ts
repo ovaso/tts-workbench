@@ -71,10 +71,6 @@ describe("MiniMaxTTSAdapter", () => {
     expect(plan.mappingReport.ignoredFields).toEqual(
       expect.arrayContaining([
         {
-          field: "voice.language",
-          reason: "MiniMax language selection is exposed through vendor extension language_boost."
-        },
-        {
           field: "controls.style",
           reason: "MiniMax model 'speech-2.8-hd' does not expose canonical style control."
         },
@@ -129,5 +125,22 @@ describe("MiniMaxTTSAdapter", () => {
     expect(result.audio.sampleRateHz).toBe(32000);
     expect([...result.audio.data]).toEqual([0, 1, 2, 3]);
     expect(result.vendorResponse.trace_id).toBe("trace_test");
+  });
+
+  it("uses the model default voice when request voice is empty", async () => {
+    const adapter = new MiniMaxTTSAdapter();
+    const plan = await adapter.plan({
+      operation: "tts.sync",
+      providerId: "minimax",
+      text: "default voice",
+      voice: {}
+    });
+
+    expect(plan.vendorRequest).toMatchObject({
+      voice_setting: {
+        voice_id: "Chinese (Mandarin)_Gentleman"
+      }
+    });
+    expect(plan.mappingReport.appliedCanonicalFields.map((field) => field.field)).not.toContain("voice");
   });
 });
