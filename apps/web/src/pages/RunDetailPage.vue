@@ -13,7 +13,12 @@
       <div class="run-meta mb-4">
         Created {{ formatLocalDateTime(detail.result.createdAt) }}
       </div>
-      <AudioPlayer v-if="detail.result.audio.url" class="mb-4" :src="detail.result.audio.url" />
+      <AudioPlayer
+        v-if="detail.result.audio.url"
+        class="mb-4"
+        :format="detail.result.audio.format"
+        :src="detail.result.audio.url"
+      />
       <v-tabs v-model="tab" density="comfortable">
         <v-tab value="request">Request</v-tab>
         <v-tab value="plan">Plan</v-tab>
