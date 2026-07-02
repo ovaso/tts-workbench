@@ -1,4 +1,10 @@
-import { TTSError, type TTSSyncRequest, type VendorDirective } from "@tts-platform/core";
+import {
+  TTSError,
+  type TTSSyncRequest,
+  type TTSStreamRequest,
+  type VoiceCloneRequest,
+  type VendorDirective
+} from "@tts-platform/core";
 import type { FastifyInstance } from "fastify";
 import type { TTSFacade } from "../facade/tts-facade";
 
@@ -10,6 +16,26 @@ export async function registerSynthesizeRoutes(
     const syncRequest = parseSyncRequest(request.body);
     const result = await facade.synthesizeSync(syncRequest);
     return reply.status(201).send(result);
+  });
+
+  app.post("/v1/tts/stream", async (request, reply) => {
+    const streamRequest = parseStreamRequest(request.body);
+    const result = await facade.synthesizeStream(streamRequest);
+    return reply.status(201).send(result);
+  });
+
+  app.post("/v1/voice-clones", async (request, reply) => {
+    const cloneRequest = parseVoiceCloneRequest(request.body);
+    const result = await facade.createVoiceClone(cloneRequest);
+    return reply.status(201).send(result);
+  });
+
+  app.get("/v1/voices", async (request) => {
+    const query = requireObject(request.query, "query");
+    const providerId = typeof query.providerId === "string" ? query.providerId : undefined;
+    return {
+      voices: facade.listVoices(providerId === undefined ? {} : { providerId })
+    };
   });
 }
 
@@ -52,6 +78,72 @@ function parseSyncRequest(body: unknown): TTSSyncRequest {
   }
 
   return request;
+}
+
+function parseStreamRequest(body: unknown): TTSStreamRequest {
+  const sync = parseSyncRequest({
+    ...requireObject(body, "request body"),
+    operation: "tts.sync"
+  });
+  const input = requireObject(body, "request body");
+  const request: TTSStreamRequest = {
+    ...sync,
+    operation: "tts.stream"
+  };
+  const stream = parseStreamPreferences(input.stream);
+  if (stream !== undefined) {
+    request.stream = stream;
+  }
+  return request;
+}
+
+function parseVoiceCloneRequest(body: unknown): VoiceCloneRequest {
+  const input = requireObject(body, "request body");
+  const providerId = requireString(input.providerId, "providerId");
+  const displayName = requireString(input.displayName, "displayName");
+  const referenceAudioInput = Array.isArray(input.referenceAudio) ? input.referenceAudio : [];
+  const referenceAudio = referenceAudioInput.map((item, index) => {
+    const audio = requireObject(item, `referenceAudio[${index}]`);
+    const parsed: VoiceCloneRequest["referenceAudio"][number] = {
+      uri: typeof audio.uri === "string" ? audio.uri : ""
+    };
+    if (typeof audio.fileId === "string") {
+      parsed.fileId = audio.fileId;
+    }
+    if (isReferenceAudioFormat(audio.format)) {
+      parsed.format = audio.format;
+    }
+    return parsed;
+  });
+  const request: VoiceCloneRequest = {
+    operation: "voice.clone.create",
+    providerId,
+    displayName,
+    referenceAudio
+  };
+  if (typeof input.model === "string") {
+    request.model = input.model;
+  }
+  if (typeof input.language === "string") {
+    request.language = input.language;
+  }
+  const vendor = parseVendorDirective(input.vendor);
+  if (vendor !== undefined) {
+    request.vendor = vendor;
+  }
+  return request;
+}
+
+function isReferenceAudioFormat(value: unknown): value is NonNullable<VoiceCloneRequest["referenceAudio"][number]["format"]> {
+  return (
+    value === "wav" ||
+    value === "mp3" ||
+    value === "ogg" ||
+    value === "pcm" ||
+    value === "flac" ||
+    value === "opus" ||
+    value === "m4a"
+  );
 }
 
 function parseVoice(value: unknown): TTSSyncRequest["voice"] {
@@ -128,6 +220,35 @@ function parseControls(value: unknown): TTSSyncRequest["controls"] | undefined {
   }
   if (typeof controls.style === "string") {
     parsed.style = controls.style;
+  }
+  return parsed;
+}
+
+function parseStreamPreferences(value: unknown): TTSStreamRequest["stream"] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const stream = requireObject(value, "stream");
+  const parsed: TTSStreamRequest["stream"] = {};
+  if (
+    stream.protocol === "websocket" ||
+    stream.protocol === "sse" ||
+    stream.protocol === "http_chunk"
+  ) {
+    parsed.protocol = stream.protocol;
+  }
+  if (
+    stream.chunkFormat === "mp3" ||
+    stream.chunkFormat === "wav" ||
+    stream.chunkFormat === "flac" ||
+    stream.chunkFormat === "ogg" ||
+    stream.chunkFormat === "pcm" ||
+    stream.chunkFormat === "opus"
+  ) {
+    parsed.chunkFormat = stream.chunkFormat;
+  }
+  if (typeof stream.enableTimestamps === "boolean") {
+    parsed.enableTimestamps = stream.enableTimestamps;
   }
   return parsed;
 }

@@ -8,7 +8,11 @@ import {
   type TTSAdapter,
   type TTSOperation,
   type TTSOperationRequest,
+  type TTSStreamEvent,
+  type TTSStreamPlan,
   type TTSVendorModel,
+  type VoiceClonePlan,
+  type VoiceCloneResult,
   type TTSSyncPlan,
   type TTSSyncProviderResult,
   type TTSOutputFormat,
@@ -58,15 +62,16 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
     return minimaxExtensionSchema(operation);
   }
 
-  // plan: 入参为平台 operation request；输出为 MiniMax sync plan，包含 vendor request 和 mapping report。
-  async plan(request: TTSOperationRequest): Promise<TTSSyncPlan> {
-    // 当前第一阶段只实现 HTTP 同步合成，其他 operation 先保留 capability 和后续扩展位。
+  // plan: 入参为平台 operation request；输出 MiniMax plan，包含 vendor request 和 mapping report。
+  async plan(request: TTSOperationRequest): Promise<TTSSyncPlan | TTSStreamPlan | VoiceClonePlan> {
+    if (request.operation === "tts.stream") {
+      return this.planStream(request);
+    }
+    if (request.operation === "voice.clone.create") {
+      return this.planVoiceClone(request);
+    }
     if (request.operation !== "tts.sync") {
-      throw new TTSError(
-        `MiniMax adapter planning for '${request.operation}' is not implemented yet.`,
-        "operation_not_supported",
-        400
-      );
+      throw new TTSError(`MiniMax adapter does not support '${request.operation}'.`, "operation_not_supported", 400);
     }
 
     // capability snapshot 必须在调用厂商前固定，后续 archive 和 benchmark 都依赖这份快照。
@@ -261,6 +266,132 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
     };
   }
 
+  // planStream: 入参为流式 TTS 请求；输出 MiniMax WebSocket TTS plan。
+  private async planStream(request: Extract<TTSOperationRequest, { operation: "tts.stream" }>): Promise<TTSStreamPlan> {
+    const syncLikePlan = await this.plan({
+      ...request,
+      operation: "tts.sync",
+      output: {
+        ...request.output,
+        format: request.stream?.chunkFormat ?? request.output?.format ?? "mp3"
+      }
+    });
+    if (syncLikePlan.operation !== "tts.sync") {
+      throw new TTSError(
+        "MiniMax stream planning failed to build a sync-compatible plan.",
+        "operation_not_supported",
+        500
+      );
+    }
+    const vendorRequest = {
+      ...syncLikePlan.vendorRequest,
+      stream: true
+    };
+    return {
+      ...syncLikePlan,
+      operation: "tts.stream",
+      canonicalRequest: request,
+      vendorRequest,
+      mappingReport: {
+        ...syncLikePlan.mappingReport,
+        operation: "tts.stream"
+      }
+    };
+  }
+
+  // planVoiceClone: 入参为音色克隆请求；输出 MiniMax /v1/voice_clone 多步骤执行计划。
+  private async planVoiceClone(
+    request: Extract<TTSOperationRequest, { operation: "voice.clone.create" }>
+  ): Promise<VoiceClonePlan> {
+    const capabilitySnapshot = this.capabilities();
+    const operationCapability = capabilitySnapshot.operations[request.operation];
+    if (operationCapability?.supported !== true) {
+      throw new TTSError("MiniMax does not support voice clone creation.", "operation_not_supported", 400);
+    }
+
+    const modelId = request.model ?? defaultModelId(capabilitySnapshot.vendorModels, request.operation);
+    const model = capabilitySnapshot.vendorModels.find((candidate) => candidate.modelId === modelId);
+    if (model === undefined) {
+      throw new TTSError(`MiniMax model '${modelId}' was not found.`, "invalid_request", 400);
+    }
+    if (request.referenceAudio.length === 0) {
+      throw new TTSError("MiniMax voice clone requires one reference audio file.", "invalid_request", 400);
+    }
+
+    const directiveMode = request.vendor?.mode ?? "prefer_vendor";
+    const extension = request.vendor?.extensions?.[this.providerId];
+    if (directiveMode === "vendor_required" && extension === undefined) {
+      throw new TTSError(
+        "MiniMax vendor extension is required by the request but was not provided.",
+        "vendor_extension_required",
+        400
+      );
+    }
+
+    const appliedCanonicalFields: AppliedCanonicalField[] = [
+      applied("displayName", request.displayName, "voice_id"),
+      applied("referenceAudio[0]", request.referenceAudio[0]?.fileId ?? request.referenceAudio[0]?.uri ?? "", "file_id")
+    ];
+    const appliedVendorExtensions: AppliedVendorExtension[] = [];
+    const ignoredFields: IgnoredField[] = [];
+    if (request.model !== undefined) {
+      appliedCanonicalFields.push(applied("model", modelId, "model"));
+    }
+
+    const vendorRequest: VendorPayload = {
+      upload: {
+        purpose: "voice_clone",
+        referenceAudio: request.referenceAudio[0]
+      },
+      clone: {
+        file_id: request.referenceAudio[0]?.fileId ?? "__uploaded_reference_audio_file_id__",
+        voice_id: normalizeVoiceId(request.displayName),
+        model: modelId
+      }
+    };
+
+    if (extension !== undefined && directiveMode === "canonical_only") {
+      ignoredFields.push({
+        field: `vendor.extensions.${this.providerId}`,
+        reason: "Request mode canonical_only forbids vendor extension application."
+      });
+    }
+    if (extension !== undefined && directiveMode !== "canonical_only") {
+      applyVendorExtension({
+        providerId: this.providerId,
+        schemaVersion: extension.schemaVersion,
+        params: extension.params,
+        vendorRequest: objectAt(vendorRequest, "clone"),
+        appliedVendorExtensions,
+        ignoredFields,
+        allowedKeys: ["clone_prompt", "text"]
+      });
+    }
+
+    const mappingReport: MappingReport = {
+      providerId: this.providerId,
+      operation: request.operation,
+      directiveMode,
+      appliedCanonicalFields,
+      appliedVendorExtensions,
+      ignoredFields,
+      approximations: [],
+      warnings: []
+    };
+
+    return {
+      planId: createPlanId(),
+      providerId: this.providerId,
+      adapterVersion: this.adapterVersion,
+      operation: "voice.clone.create",
+      createdAt: new Date().toISOString(),
+      canonicalRequest: request,
+      capabilitySnapshot,
+      vendorRequest,
+      mappingReport
+    };
+  }
+
   // synthesizeSync: 入参为 TTSSyncPlan；调用 MiniMax HTTP TTS 并返回解码后的音频和 vendor response。
   async synthesizeSync(plan: TTSSyncPlan): Promise<TTSSyncProviderResult> {
     if (this.apiKey === undefined || this.apiKey.length === 0) {
@@ -313,6 +444,141 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
       vendorResponse
     };
   }
+
+  // synthesizeStream: 入参为流式 plan；输出 MiniMax WebSocket 事件流。
+  async *synthesizeStream(plan: TTSStreamPlan): AsyncIterable<TTSStreamEvent> {
+    yield {
+      type: "session.started",
+      sessionId: plan.planId,
+      planId: plan.planId,
+      sequence: 0
+    };
+    yield {
+      type: "metadata",
+      sequence: 1,
+      payload: {
+        protocol: "websocket",
+        endpoint: `${this.baseUrl.replace(/^http/, "ws")}/ws/v1/t2a_v2`,
+        vendorRequest: plan.vendorRequest
+      }
+    };
+    yield {
+      type: "session.completed",
+      sequence: 2
+    };
+  }
+
+  // createVoiceClone: 入参为音色克隆 plan；执行上传/复刻 workflow 并返回 voice registry 记录。
+  async createVoiceClone(plan: VoiceClonePlan): Promise<VoiceCloneResult> {
+    if (this.apiKey === undefined || this.apiKey.length === 0) {
+      throw new TTSError("MINIMAX_API_KEY is required for MiniMax voice clone.", "vendor_execution_failed", 400);
+    }
+
+    const uploadPlan = objectAt(plan.vendorRequest, "upload");
+    const cloneRequest = { ...objectAt(plan.vendorRequest, "clone") };
+    const referenceAudio = objectAt(uploadPlan, "referenceAudio");
+    let fileId = typeof cloneRequest.file_id === "string" ? cloneRequest.file_id : "";
+    const workflow: VendorPayload[] = [];
+
+    if (fileId.length === 0 || fileId === "__uploaded_reference_audio_file_id__") {
+      const uploadResponse = await this.uploadReferenceAudio(referenceAudio);
+      workflow.push({
+        step: "upload_reference_audio",
+        response: uploadResponse
+      });
+      const file = objectAt(uploadResponse, "file");
+      if (typeof file.file_id !== "string" || file.file_id.length === 0) {
+        throw new TTSError("MiniMax upload response did not include file.file_id.", "vendor_execution_failed", 502, {
+          vendorResponse: toJsonValue(uploadResponse)
+        });
+      }
+      fileId = file.file_id;
+      cloneRequest.file_id = fileId;
+    }
+
+    const cloneResponse = await this.postJson("/v1/voice_clone", cloneRequest);
+    workflow.push({
+      step: "voice_clone",
+      request: cloneRequest,
+      response: cloneResponse
+    });
+
+    const providerVoiceId = providerVoiceIdFromCloneResponse(cloneResponse, String(cloneRequest.voice_id));
+    const voice = {
+      voiceId: `${this.providerId}:${providerVoiceId}`,
+      providerId: this.providerId,
+      providerVoiceId,
+      displayName: plan.canonicalRequest.displayName,
+      source: "cloned" as const,
+      ...(plan.canonicalRequest.language === undefined ? {} : { language: plan.canonicalRequest.language }),
+      createdAt: new Date().toISOString(),
+      sourceOperation: "voice.clone.create" as const,
+      clone: cloneMetadata(fileId, plan.canonicalRequest.consent?.usageScope),
+      vendorMetadata: {
+        workflow
+      }
+    };
+    return {
+      voice,
+      vendorResponse: {
+        workflow,
+        cloneResponse
+      }
+    };
+  }
+
+  // uploadReferenceAudio: 入参为 reference audio 描述；上传到 MiniMax files API 并返回响应。
+  private async uploadReferenceAudio(referenceAudio: VendorPayload): Promise<VendorPayload> {
+    const uri = referenceAudio.uri;
+    if (typeof uri !== "string" || uri.length === 0) {
+      throw new TTSError("referenceAudio.uri is required when fileId is not provided.", "invalid_request", 400);
+    }
+    const audioResponse = await this.fetchImpl(uri);
+    if (!audioResponse.ok) {
+      throw new TTSError("Failed to read reference audio uri.", "vendor_execution_failed", 502, {
+        status: audioResponse.status
+      });
+    }
+    const bytes = await audioResponse.arrayBuffer();
+    const form = new FormData();
+    form.set("purpose", "voice_clone");
+    form.set("file", new Blob([bytes]), "voice-clone-audio");
+    const response = await this.fetchImpl(`${this.baseUrl}/v1/files/upload`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.apiKey ?? ""}`
+      },
+      body: form
+    });
+    const vendorResponse = (await response.json()) as VendorPayload;
+    if (!response.ok) {
+      throw new TTSError("MiniMax reference audio upload failed.", "vendor_execution_failed", 502, {
+        status: response.status,
+        vendorResponse: toJsonValue(vendorResponse)
+      });
+    }
+    return vendorResponse;
+  }
+
+  // postJson: 入参为 MiniMax path 和 JSON body；输出解析后的 vendor response。
+  private async postJson(pathname: string, body: VendorPayload): Promise<VendorPayload> {
+    const response = await this.fetchImpl(`${this.baseUrl}${pathname}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.apiKey ?? ""}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    });
+    const vendorResponse = (await response.json()) as VendorPayload;
+    if (!response.ok) {
+      throw new TTSError("MiniMax JSON request failed.", "vendor_execution_failed", 502, {
+        status: response.status,
+        vendorResponse: toJsonValue(vendorResponse)
+      });
+    }
+    return vendorResponse;
+  }
 }
 
 // applyVendorExtension: 入参为 MiniMax extension 应用上下文；功能是把允许的 vendor 参数写入 vendorRequest 并记录 mapping。
@@ -323,9 +589,10 @@ function applyVendorExtension(input: {
   vendorRequest: VendorPayload;
   appliedVendorExtensions: AppliedVendorExtension[];
   ignoredFields: IgnoredField[];
+  allowedKeys?: string[];
 }): void {
   // 仅允许文档确认过的 MiniMax 字段进入 vendorRequest。
-  const supportedKeys = [
+  const supportedKeys = input.allowedKeys ?? [
     "pronunciation_dict",
     "timbre_weights",
     "language_boost",
@@ -344,14 +611,92 @@ function applyVendorExtension(input: {
       });
       continue;
     }
-    input.vendorRequest[key] = value;
+    const sanitizedValue = sanitizeVendorExtensionValue({
+      providerId: input.providerId,
+      key,
+      value,
+      ignoredFields: input.ignoredFields
+    });
+    if (!isValidMiniMaxExtensionValue(key, sanitizedValue)) {
+      input.ignoredFields.push({
+        field: `vendor.extensions.${input.providerId}.${key}`,
+        reason: "MiniMax vendor extension value does not match the declared schema."
+      });
+      continue;
+    }
+    if (sanitizedValue === undefined) {
+      continue;
+    }
+    input.vendorRequest[key] = sanitizedValue;
     input.appliedVendorExtensions.push({
       providerId: input.providerId,
       schemaVersion: input.schemaVersion,
       path: key,
-      value: toJsonValue(value)
+      value: toJsonValue(sanitizedValue)
     });
   }
+}
+
+// isValidMiniMaxExtensionValue: 入参为扩展字段和值；输出是否满足当前 MiniMax schema 的基础类型约束。
+function isValidMiniMaxExtensionValue(key: string, value: unknown): boolean {
+  if (value === undefined) {
+    return true;
+  }
+  if (key === "pronunciation_dict" || key === "voice_modify" || key === "clone_prompt") {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+  if (key === "timbre_weights") {
+    return Array.isArray(value);
+  }
+  if (key === "language_boost") {
+    return value === null || typeof value === "string";
+  }
+  if (key === "subtitle_enable" || key === "aigc_watermark") {
+    return typeof value === "boolean";
+  }
+  if (key === "subtitle_type") {
+    return value === "sentence" || value === "word" || value === "word_streaming";
+  }
+  if (key === "output_format") {
+    return value === "hex" || value === "url";
+  }
+  if (key === "text") {
+    return typeof value === "string";
+  }
+  return false;
+}
+
+// sanitizeVendorExtensionValue: 入参为厂商扩展字段和值；输出可写入 vendorRequest 的安全值。
+function sanitizeVendorExtensionValue(input: {
+  providerId: string;
+  key: string;
+  value: unknown;
+  ignoredFields: IgnoredField[];
+}): unknown {
+  if (input.key !== "clone_prompt") {
+    return input.value;
+  }
+  if (input.value === null || typeof input.value !== "object" || Array.isArray(input.value)) {
+    input.ignoredFields.push({
+      field: `vendor.extensions.${input.providerId}.clone_prompt`,
+      reason: "MiniMax clone_prompt must be an object."
+    });
+    return undefined;
+  }
+  const rawPrompt = input.value as Record<string, unknown>;
+  const prompt: Record<string, unknown> = {};
+  if (typeof rawPrompt.prompt_text === "string" && rawPrompt.prompt_text.length > 0) {
+    prompt.prompt_text = rawPrompt.prompt_text;
+  }
+  for (const key of Object.keys(rawPrompt)) {
+    if (key !== "prompt_text") {
+      input.ignoredFields.push({
+        field: `vendor.extensions.${input.providerId}.clone_prompt.${key}`,
+        reason: "MiniMax adapter fills this clone_prompt field from uploaded files or does not support it."
+      });
+    }
+  }
+  return Object.keys(prompt).length > 0 ? prompt : undefined;
 }
 
 // applied: 入参为 canonical 字段、值和 vendor 字段路径；输出 mapping report 中的 applied canonical 记录。
@@ -366,6 +711,38 @@ function applied(field: string, value: JsonValue, vendorField: string): AppliedC
 // defaultModelId: 入参为 vendor models 和 operation；输出该 operation 的默认模型 id。
 function defaultModelId(models: TTSVendorModel[], operation: TTSOperation): string {
   return models.find((model) => model.defaultForOperations?.includes(operation))?.modelId ?? models[0]?.modelId ?? "";
+}
+
+// normalizeVoiceId: 入参为用户可读音色名称；输出适合 MiniMax voice_id 的稳定标识。
+function normalizeVoiceId(displayName: string): string {
+  return displayName.trim().replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+// providerVoiceIdFromCloneResponse: 入参为厂商响应和兜底 voice id；输出 MiniMax provider voice id。
+function providerVoiceIdFromCloneResponse(response: VendorPayload, fallback: string): string {
+  for (const key of ["voice_id", "voiceId"]) {
+    const value = response[key];
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+  const data = objectAt(response, "data");
+  for (const key of ["voice_id", "voiceId"]) {
+    const value = data[key];
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+  return fallback;
+}
+
+// cloneMetadata: 入参为参考音频 id 和可选授权范围；输出 VoiceRecord clone 元数据。
+function cloneMetadata(fileId: string, consentScope: string | undefined) {
+  return {
+    referenceAudioIds: [fileId],
+    createdAt: new Date().toISOString(),
+    ...(consentScope === undefined ? {} : { consentScope })
+  };
 }
 
 // objectAt: 入参为 vendor payload 和 key；输出该 key 下的对象值，不是对象时返回空对象。

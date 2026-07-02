@@ -40,7 +40,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
     })
   ]);
   const archive = new FileRunArchive(options.dataRoot);
-  const voices = new InMemoryVoiceRegistry();
+  const voices = new InMemoryVoiceRegistry(options.dataRoot);
   const facade = new TTSFacade(registry, archive, voices);
 
   app.setErrorHandler((error, _request, reply) => {

@@ -4,10 +4,14 @@ import path from "node:path";
 import {
   TTSError,
   type MappingReport,
+  type TTSPlan,
   type TTSSyncPlan,
   type TTSSyncProviderResult,
   type TTSSyncRequest,
   type TTSSyncResult,
+  type VoiceClonePlan,
+  type VoiceCloneRequest,
+  type VoiceCloneResult,
   type VendorPayload
 } from "@tts-platform/core";
 import { createRunId } from "../utils/ids";
@@ -30,10 +34,17 @@ export interface ArchiveRunInput {
   runId?: string;
 }
 
+export interface ArchiveVoiceCloneInput {
+  request: VoiceCloneRequest;
+  plan: VoiceClonePlan;
+  providerResult: VoiceCloneResult;
+  runId?: string;
+}
+
 export interface StoredRunDetail {
   result: TTSSyncResult;
   request: TTSSyncRequest;
-  plan: TTSSyncPlan;
+  plan: TTSPlan;
   mappingReport: MappingReport;
   vendorRequest: VendorPayload;
   vendorResponse: VendorPayload;
@@ -85,6 +96,31 @@ export class FileRunArchive {
     return result;
   }
 
+  async writeVoiceClone(input: ArchiveVoiceCloneInput): Promise<VoiceCloneResult> {
+    const runId = input.runId ?? createRunId();
+    assertSafeRunId(runId);
+
+    const directory = runRoot(this.dataRoot, runId);
+    await mkdir(directory, { recursive: true });
+
+    const result = {
+      ...input.providerResult,
+      archive: {
+        runPath: `data/runs/${runId}`,
+        files: [...ARCHIVE_FILES]
+      }
+    };
+
+    await writePrettyJson(path.join(directory, "request.json"), input.request);
+    await writePrettyJson(path.join(directory, "plan.json"), input.plan);
+    await writePrettyJson(path.join(directory, "mapping-report.json"), input.plan.mappingReport);
+    await writePrettyJson(path.join(directory, "vendor-request.json"), input.plan.vendorRequest);
+    await writePrettyJson(path.join(directory, "vendor-response.json"), input.providerResult.vendorResponse);
+    await writePrettyJson(path.join(directory, "result.json"), result);
+
+    return input.providerResult;
+  }
+
   async listRuns(): Promise<TTSSyncResult[]> {
     await mkdir(runsRoot(this.dataRoot), { recursive: true });
     const entries = await readdir(runsRoot(this.dataRoot), { withFileTypes: true });
@@ -115,7 +151,7 @@ export class FileRunArchive {
     const [result, request, plan, mappingReport, vendorRequest, vendorResponse] = await Promise.all([
       readJsonFile<TTSSyncResult>(path.join(directory, "result.json")),
       readJsonFile<TTSSyncRequest>(path.join(directory, "request.json")),
-      readJsonFile<TTSSyncPlan>(path.join(directory, "plan.json")),
+      readJsonFile<TTSPlan>(path.join(directory, "plan.json")),
       readJsonFile<MappingReport>(path.join(directory, "mapping-report.json")),
       readJsonFile<VendorPayload>(path.join(directory, "vendor-request.json")),
       readJsonFile<VendorPayload>(path.join(directory, "vendor-response.json"))

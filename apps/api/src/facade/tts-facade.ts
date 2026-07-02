@@ -50,11 +50,46 @@ export class TTSFacade {
   }
 
   async synthesizeStream(_request: TTSStreamRequest): Promise<TTSStreamSession> {
-    throw new TTSError("Streaming synthesis is not implemented yet.", "operation_not_supported", 501);
+    const request = _request;
+    const adapter = this.registry.getOrThrow(request.providerId);
+    const plan = await adapter.plan(request);
+
+    if (plan.operation !== "tts.stream" || adapter.synthesizeStream === undefined) {
+      throw new TTSError(
+        `Provider '${request.providerId}' does not support tts.stream.`,
+        "operation_not_supported",
+        400
+      );
+    }
+
+    return {
+      sessionId: plan.planId,
+      providerId: request.providerId,
+      operation: "tts.stream",
+      protocol: request.stream?.protocol ?? "websocket"
+    };
   }
 
-  async createVoiceClone(_request: VoiceCloneRequest): Promise<VoiceCloneResult> {
-    throw new TTSError("Voice clone creation is not implemented yet.", "operation_not_supported", 501);
+  async createVoiceClone(request: VoiceCloneRequest): Promise<VoiceCloneResult> {
+    const adapter = this.registry.getOrThrow(request.providerId);
+    const plan = await adapter.plan(request);
+
+    if (plan.operation !== "voice.clone.create" || adapter.createVoiceClone === undefined) {
+      throw new TTSError(
+        `Provider '${request.providerId}' does not support voice.clone.create.`,
+        "operation_not_supported",
+        400
+      );
+    }
+
+    const providerResult = await adapter.createVoiceClone(plan);
+    this.voices.save(providerResult.voice);
+    await this.archive.writeVoiceClone({
+      request,
+      plan,
+      providerResult
+    });
+    return providerResult;
   }
 
   listVoices(query?: VoiceQuery): VoiceRecord[] {

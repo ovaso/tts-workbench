@@ -120,6 +120,10 @@ describe("MiniMaxTTSAdapter", () => {
         providerVoiceId: "male-qn-qingse"
       }
     });
+    expect(plan.operation).toBe("tts.sync");
+    if (plan.operation !== "tts.sync") {
+      throw new Error("Expected sync plan.");
+    }
     const result = await adapter.synthesizeSync(plan);
 
     expect(result.audio.format).toBe("mp3");
@@ -166,5 +170,159 @@ describe("MiniMaxTTSAdapter", () => {
     expect(Object.keys((schema.properties ?? {}) as Record<string, unknown>)).not.toContain("file_id");
     expect(Object.keys((schema.properties ?? {}) as Record<string, unknown>)).not.toContain("voice_id");
     expect(Object.keys((schema.properties ?? {}) as Record<string, unknown>)).not.toContain("model");
+  });
+
+  it("plans voice clone and ignores upload-derived vendor extension fields", async () => {
+    const adapter = new MiniMaxTTSAdapter();
+    const plan = await adapter.plan({
+      operation: "voice.clone.create",
+      providerId: "minimax",
+      displayName: "demo voice",
+      model: "speech-2.8-hd",
+      referenceAudio: [
+        {
+          uri: "https://example.com/audio.mp3",
+          fileId: "file_existing"
+        }
+      ],
+      vendor: {
+        mode: "prefer_vendor",
+        extensions: {
+          minimax: {
+            schemaVersion: "1.0.0",
+            params: {
+              clone_prompt: {
+                prompt_audio: "should_be_ignored",
+                prompt_text: "sample words"
+              },
+              text: "preview text"
+            }
+          }
+        }
+      }
+    });
+
+    expect(plan.operation).toBe("voice.clone.create");
+    expect(plan.vendorRequest).toMatchObject({
+      clone: {
+        file_id: "file_existing",
+        voice_id: "demo_voice",
+        model: "speech-2.8-hd",
+        clone_prompt: {
+          prompt_text: "sample words"
+        },
+        text: "preview text"
+      }
+    });
+    expect(plan.mappingReport.ignoredFields).toContainEqual({
+      field: "vendor.extensions.minimax.clone_prompt.prompt_audio",
+      reason: "MiniMax adapter fills this clone_prompt field from uploaded files or does not support it."
+    });
+  });
+
+  it("ignores MiniMax vendor extension values that do not match the schema", async () => {
+    const adapter = new MiniMaxTTSAdapter();
+    const plan = await adapter.plan({
+      operation: "tts.sync",
+      providerId: "minimax",
+      text: "schema validation",
+      voice: {},
+      vendor: {
+        mode: "prefer_vendor",
+        extensions: {
+          minimax: {
+            schemaVersion: "1.0.0",
+            params: {
+              subtitle_enable: "yes",
+              output_format: "binary"
+            }
+          }
+        }
+      }
+    });
+
+    expect(plan.vendorRequest).not.toHaveProperty("subtitle_enable");
+    expect(plan.vendorRequest).not.toHaveProperty("output_format");
+    expect(plan.mappingReport.ignoredFields).toEqual(
+      expect.arrayContaining([
+        {
+          field: "vendor.extensions.minimax.subtitle_enable",
+          reason: "MiniMax vendor extension value does not match the declared schema."
+        },
+        {
+          field: "vendor.extensions.minimax.output_format",
+          reason: "MiniMax vendor extension value does not match the declared schema."
+        }
+      ])
+    );
+  });
+
+  it("executes voice clone with an existing uploaded file id", async () => {
+    const fetchCalls: string[] = [];
+    const adapter = new MiniMaxTTSAdapter({
+      apiKey: "test-key",
+      fetch: async (url) => {
+        fetchCalls.push(String(url));
+        return new Response(
+          JSON.stringify({
+            data: {
+              voice_id: "cloned_voice"
+            },
+            base_resp: {
+              status_code: 0,
+              status_msg: "success"
+            }
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json"
+            }
+          }
+        );
+      }
+    });
+
+    const plan = await adapter.plan({
+      operation: "voice.clone.create",
+      providerId: "minimax",
+      displayName: "Cloned Voice",
+      referenceAudio: [
+        {
+          uri: "",
+          fileId: "file_existing"
+        }
+      ]
+    });
+    if (plan.operation !== "voice.clone.create") {
+      throw new Error("Expected voice clone plan.");
+    }
+
+    const result = await adapter.createVoiceClone(plan);
+
+    expect(fetchCalls).toEqual(["https://api.minimaxi.com/v1/voice_clone"]);
+    expect(result.voice.providerVoiceId).toBe("cloned_voice");
+    expect(result.voice.clone?.referenceAudioIds).toEqual(["file_existing"]);
+  });
+
+  it("plans stream synthesis and emits stream lifecycle events", async () => {
+    const adapter = new MiniMaxTTSAdapter();
+    const plan = await adapter.plan({
+      operation: "tts.stream",
+      providerId: "minimax",
+      text: "stream me",
+      voice: {}
+    });
+    if (plan.operation !== "tts.stream") {
+      throw new Error("Expected stream plan.");
+    }
+
+    const events = [];
+    for await (const event of adapter.synthesizeStream(plan)) {
+      events.push(event.type);
+    }
+
+    expect(plan.vendorRequest.stream).toBe(true);
+    expect(events).toEqual(["session.started", "metadata", "session.completed"]);
   });
 });

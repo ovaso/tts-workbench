@@ -227,7 +227,7 @@ data/runs/{runId}/
 
 ## WebSocket TTS Contract
 
-当前 adapter 已声明 `tts.stream` capability，但执行链路尚未实现。后续应将 MiniMax WebSocket 帧转换为平台 `TTSStreamEvent`。
+当前 adapter 已声明 `tts.stream` capability，并提供 `TTSStreamPlan` 与 `TTSStreamEvent` 生命周期入口。API 已能创建 stream session；真正面向前端的 WebSocket pipe/proxy 仍需后续补齐。
 
 ```mermaid
 sequenceDiagram
@@ -311,7 +311,7 @@ sequenceDiagram
 
 ## Voice Clone Contract
 
-当前 adapter 已声明 `voice.clone.create` capability，但执行链路尚未实现。后续必须按多步骤 workflow 归档每一步 vendor request/response。
+当前 adapter 已声明 `voice.clone.create` capability，并实现了基于 plan 的多步骤 workflow：主参考音频上传、`/v1/voice_clone` 请求、voice registry 写入和 run archive 保存。
 
 ```mermaid
 sequenceDiagram

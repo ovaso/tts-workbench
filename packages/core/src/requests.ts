@@ -75,6 +75,7 @@ export interface VoiceCloneRequest {
   operation: "voice.clone.create";
   providerId: string;
   displayName: string;
+  model?: string;
   language?: string;
   referenceAudio: ReferenceAudio[];
   consent?: VoiceCloneConsent;

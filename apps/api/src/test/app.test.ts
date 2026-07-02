@@ -110,4 +110,38 @@ describe("api app", () => {
     expect(response.statusCode).toBe(201);
     expect(response.json().audio.fileName).toBe("audio.wav");
   });
+
+  it("creates a stream session through the stream endpoint", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/tts/stream",
+      payload: {
+        providerId: "minimax",
+        text: "hello stream",
+        voice: {},
+        stream: {
+          protocol: "websocket"
+        }
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      providerId: "minimax",
+      operation: "tts.stream",
+      protocol: "websocket"
+    });
+  });
+
+  it("lists persisted voices", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/voices?providerId=minimax"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      voices: []
+    });
+  });
 });
