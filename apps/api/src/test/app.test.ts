@@ -56,6 +56,11 @@ describe("api app", () => {
           providerId: "cosyvoice",
           providerName: "CosyVoice",
           adapterVersion: "0.1.0"
+        },
+        {
+          providerId: "doubao",
+          providerName: "Doubao",
+          adapterVersion: "0.1.0"
         }
       ]
     });

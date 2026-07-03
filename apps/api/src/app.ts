@@ -3,6 +3,7 @@ import websocket from "@fastify/websocket";
 import { TTSError } from "@tts-platform/core";
 import fastify, { type FastifyInstance } from "fastify";
 import { CosyVoiceTTSAdapter } from "./adapters/cosyvoice/adapter";
+import { DoubaoTTSAdapter } from "./adapters/doubao/adapter";
 import { MiniMaxTTSAdapter } from "./adapters/minimax/adapter";
 import { MockTTSAdapter } from "./adapters/mock/adapter";
 import { AdapterRegistry } from "./facade/adapter-registry";
@@ -59,6 +60,15 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         process.env.cosyvoice_inference_endpoint ??
         process.env.DASHSCOPE_INFERENCE_ENDPOINT ??
         process.env.dashscope_inference_endpoint
+    }),
+    // DoubaoTTSAdapter: 注册火山引擎豆包语音；支持新版 API Key 和旧版 app/access key。
+    new DoubaoTTSAdapter({
+      apiKey: process.env.DOUBAO_API_KEY ?? process.env.doubao_api_key,
+      appId: process.env.DOUBAO_APP_ID ?? process.env.doubao_app_id,
+      accessToken:
+        process.env.DOUBAO_ACCESS_TOKEN ??
+        process.env.doubao_access_token ??
+        process.env["doubao_access-token"]
     })
   ]);
   const archive = new FileRunArchive(options.dataRoot);

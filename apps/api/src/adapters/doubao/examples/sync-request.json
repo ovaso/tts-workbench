@@ -1,0 +1,28 @@
+{
+  "providerId": "doubao",
+  "text": "家长您好，我们这边可以先给孩子安排一节免费的试听课。",
+  "model": "seed-icl-2.0",
+  "voice": {
+    "providerVoiceId": "custom_zh_parent"
+  },
+  "output": {
+    "format": "mp3",
+    "sampleRateHz": 24000
+  },
+  "controls": {
+    "speed": 0,
+    "volume": 0
+  },
+  "vendor": {
+    "mode": "prefer_vendor",
+    "extensions": {
+      "doubao": {
+        "schemaVersion": "1.0.0",
+        "params": {
+          "ttsModel": "seed-tts-2.0-standard",
+          "requireUsageTokens": true
+        }
+      }
+    }
+  }
+}

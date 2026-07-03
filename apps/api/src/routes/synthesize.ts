@@ -280,6 +280,9 @@ function parseVoiceCloneRequest(body: unknown): VoiceCloneRequest {
     if (typeof audio.fileId === "string") {
       parsed.fileId = audio.fileId;
     }
+    if (typeof audio.path === "string") {
+      parsed.path = audio.path;
+    }
     if (isReferenceAudioFormat(audio.format)) {
       parsed.format = audio.format;
     }
