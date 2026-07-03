@@ -34,6 +34,19 @@ export interface TTSSyncResult {
   };
 }
 
+export interface TTSStreamResult {
+  runId: string;
+  providerId: string;
+  operation: "tts.stream";
+  status: RunStatus;
+  createdAt: string;
+  audio?: AudioArtifact;
+  archive: {
+    runPath: string;
+    files: string[];
+  };
+}
+
 export interface ArchivedRunSummary {
   runId: string;
   providerId: string;
@@ -113,6 +126,7 @@ export interface VoiceRecord {
 
 export interface VoiceQuery {
   providerId?: string;
+  modelId?: string;
 }
 
 export interface VoiceCreateRequest {
