@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { MiniMaxTTSAdapter } from "../adapters/minimax/adapter";
+import {
+  MiniMaxTTSAdapter,
+  type MiniMaxWebSocketFactory,
+  type MiniMaxWebSocketLike
+} from "../adapters/minimax/adapter";
 import { minimaxExtensionSchema } from "../adapters/minimax/extension-schema";
 
 describe("MiniMaxTTSAdapter", () => {
@@ -460,13 +464,29 @@ describe("MiniMaxTTSAdapter", () => {
     await expect(adapter.createVoiceClone(plan)).rejects.toThrow("MiniMax voice clone returned an error.");
   });
 
-  it("plans stream synthesis and emits stream lifecycle events", async () => {
-    const adapter = new MiniMaxTTSAdapter();
+  it("plans stream synthesis and decodes MiniMax websocket hex audio chunks", async () => {
+    const sentFrames: unknown[] = [];
+    const webSocketFactory: MiniMaxWebSocketFactory = () => new FakeMiniMaxWebSocket(sentFrames);
+    const adapter = new MiniMaxTTSAdapter({
+      apiKey: "test-key",
+      webSocketFactory
+    });
     const plan = await adapter.plan({
       operation: "tts.stream",
       providerId: "minimax",
       text: "stream me",
-      voice: {}
+      voice: {},
+      vendor: {
+        mode: "prefer_vendor",
+        extensions: {
+          minimax: {
+            schemaVersion: "1.0.0",
+            params: {
+              output_format: "hex"
+            }
+          }
+        }
+      }
     });
     if (plan.operation !== "tts.stream") {
       throw new Error("Expected stream plan.");
@@ -474,10 +494,136 @@ describe("MiniMaxTTSAdapter", () => {
 
     const events = [];
     for await (const event of adapter.synthesizeStream(plan)) {
-      events.push(event.type);
+      events.push(event);
     }
 
     expect(plan.vendorRequest.stream).toBe(true);
-    expect(events).toEqual(["session.started", "metadata", "session.completed"]);
+    expect(events.map((event) => event.type)).toContain("audio.chunk");
+    expect(events.at(-1)?.type).toBe("session.completed");
+    const audioEvent = events.find((event) => event.type === "audio.chunk");
+    expect(audioEvent?.type).toBe("audio.chunk");
+    if (audioEvent?.type !== "audio.chunk") {
+      throw new Error("Expected audio chunk event.");
+    }
+    expect([...audioEvent.data]).toEqual([0, 1, 2, 3]);
+    expect(audioEvent.format).toBe("mp3");
+    expect(sentFrames).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "task_start",
+          model: "speech-2.8-hd",
+          audio_setting: expect.objectContaining({
+            format: "mp3"
+          })
+        }),
+        {
+          event: "task_continue",
+          text: "stream me"
+        },
+        {
+          event: "task_finish"
+        }
+      ])
+    );
   });
 });
+
+class FakeMiniMaxWebSocket implements MiniMaxWebSocketLike {
+  private readonly listeners: {
+    open: Array<() => void>;
+    message: Array<(data: Buffer, isBinary: boolean) => void>;
+    error: Array<(error: Error) => void>;
+    close: Array<(code: number, reason: Buffer) => void>;
+  } = {
+    open: [],
+    message: [],
+    error: [],
+    close: []
+  };
+
+  // constructor: 入参为已发送帧记录数组；功能是建立可控的 MiniMax WebSocket 测试替身。
+  constructor(private readonly sentFrames: unknown[]) {
+    queueMicrotask(() => {
+      this.emitOpen();
+      this.emitJson({
+        event: "connected_success"
+      });
+    });
+  }
+
+  // send: 入参为 adapter 发出的 JSON 文本；功能是记录帧并按 MiniMax 协议返回模拟响应。
+  send(data: string): void {
+    const frame = JSON.parse(data) as { event?: string };
+    this.sentFrames.push(frame);
+    if (frame.event === "task_start") {
+      queueMicrotask(() => {
+        this.emitJson({
+          event: "task_started"
+        });
+      });
+      return;
+    }
+    if (frame.event === "task_continue") {
+      queueMicrotask(() => {
+        this.emitJson({
+          data: {
+            audio: "00010203"
+          },
+          is_final: true
+        });
+      });
+    }
+  }
+
+  // close: 入参为关闭码和原因；功能是向 adapter 模拟上游连接关闭。
+  close(code = 1000, reason = ""): void {
+    queueMicrotask(() => {
+      for (const listener of this.listeners.close) {
+        listener(code, Buffer.from(reason));
+      }
+    });
+  }
+
+  on(event: "open", listener: () => void): void;
+  on(event: "message", listener: (data: Buffer, isBinary: boolean) => void): void;
+  on(event: "error", listener: (error: Error) => void): void;
+  on(event: "close", listener: (code: number, reason: Buffer) => void): void;
+  // on: 入参为事件名和监听器；功能是登记 WebSocket 事件回调。
+  on(
+    event: "open" | "message" | "error" | "close",
+    listener:
+      | (() => void)
+      | ((data: Buffer, isBinary: boolean) => void)
+      | ((error: Error) => void)
+      | ((code: number, reason: Buffer) => void)
+  ): void {
+    if (event === "open") {
+      this.listeners.open.push(listener as () => void);
+      return;
+    }
+    if (event === "message") {
+      this.listeners.message.push(listener as (data: Buffer, isBinary: boolean) => void);
+      return;
+    }
+    if (event === "error") {
+      this.listeners.error.push(listener as (error: Error) => void);
+      return;
+    }
+    this.listeners.close.push(listener as (code: number, reason: Buffer) => void);
+  }
+
+  // emitOpen: 无入参；功能是触发已连接事件。
+  private emitOpen(): void {
+    for (const listener of this.listeners.open) {
+      listener();
+    }
+  }
+
+  // emitJson: 入参为响应对象；功能是向 adapter 推送 MiniMax JSON 文本帧。
+  private emitJson(payload: unknown): void {
+    const data = Buffer.from(JSON.stringify(payload));
+    for (const listener of this.listeners.message) {
+      listener(data, false);
+    }
+  }
+}

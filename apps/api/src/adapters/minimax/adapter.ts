@@ -1,3 +1,4 @@
+import WebSocket, { type RawData } from "ws";
 import {
   TTSError,
   type AppliedCanonicalField,
@@ -30,7 +31,24 @@ export interface MiniMaxAdapterOptions {
   apiKey?: string | undefined;
   baseUrl?: string;
   fetch?: typeof fetch;
+  webSocketFactory?: MiniMaxWebSocketFactory;
 }
+
+export interface MiniMaxWebSocketLike {
+  send(data: string): void;
+  close(code?: number, reason?: string): void;
+  on(event: "open", listener: () => void): void;
+  on(event: "message", listener: (data: RawData, isBinary: boolean) => void): void;
+  on(event: "error", listener: (error: Error) => void): void;
+  on(event: "close", listener: (code: number, reason: Buffer) => void): void;
+}
+
+export type MiniMaxWebSocketFactory = (
+  url: string,
+  init: {
+    headers: Record<string, string>;
+  }
+) => MiniMaxWebSocketLike;
 
 // MiniMaxTTSAdapter: 厂商 Adapter 实现；负责 MiniMax capability 暴露、plan-first 映射和 HTTP TTS 执行。
 export class MiniMaxTTSAdapter implements TTSAdapter {
@@ -38,6 +56,7 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
   private readonly apiKey: string | undefined;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly webSocketFactory: MiniMaxWebSocketFactory;
 
   readonly providerId;
   readonly adapterVersion;
@@ -50,6 +69,7 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
     this.apiKey = options.apiKey;
     this.baseUrl = options.baseUrl ?? DEFAULT_BASE_URL;
     this.fetchImpl = options.fetch ?? fetch;
+    this.webSocketFactory = options.webSocketFactory ?? ((url, init) => new WebSocket(url, init));
   }
 
   // capabilities: 无入参；返回 MiniMax 当前 adapter 实例固化的厂商能力定义。
@@ -450,25 +470,166 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
 
   // synthesizeStream: 入参为流式 plan；输出 MiniMax WebSocket 事件流。
   async *synthesizeStream(plan: TTSStreamPlan): AsyncIterable<TTSStreamEvent> {
+    if (this.apiKey === undefined || this.apiKey.length === 0) {
+      throw new TTSError("MINIMAX_API_KEY is required for MiniMax stream synthesis.", "vendor_execution_failed", 400);
+    }
+
+    const endpoint = `${this.baseUrl.replace(/^http/, "ws")}/ws/v1/t2a_v2`;
+    const startTask = streamStartTask(plan.vendorRequest);
+    const continueTask = streamContinueTask(plan.vendorRequest);
+    const finishTask = streamFinishTask();
+    const format = outputFormatFromVendor(plan.vendorRequest, {});
+    const events = new AsyncEventQueue<MiniMaxUpstreamEvent>();
+    let sequence = 0;
+    let socket: MiniMaxWebSocketLike | undefined;
+    let sentStart = false;
+    let sentText = false;
+    let completed = false;
+
     yield {
       type: "session.started",
       sessionId: plan.planId,
       planId: plan.planId,
-      sequence: 0
+      sequence
     };
+    sequence += 1;
+
+    socket = this.webSocketFactory(endpoint, {
+      headers: {
+        Authorization: `Bearer ${this.apiKey}`
+      }
+    });
+    socket.on("open", () => {
+      events.push({ type: "open" });
+    });
+    socket.on("message", (data, isBinary) => {
+      events.push({ type: "message", data, isBinary });
+    });
+    socket.on("error", (error) => {
+      events.push({ type: "error", error });
+    });
+    socket.on("close", (code, reason) => {
+      events.push({ type: "close", code, reason: reason.toString("utf8") });
+      events.end();
+    });
+
     yield {
       type: "metadata",
-      sequence: 1,
+      sequence,
       payload: {
         protocol: "websocket",
-        endpoint: `${this.baseUrl.replace(/^http/, "ws")}/ws/v1/t2a_v2`,
-        vendorRequest: plan.vendorRequest
+        endpoint,
+        startTask,
+        continueTask
       }
     };
-    yield {
-      type: "session.completed",
-      sequence: 2
-    };
+    sequence += 1;
+
+    try {
+      for await (const event of events) {
+        if (event.type === "open") {
+          continue;
+        }
+
+        if (event.type === "error") {
+          yield {
+            type: "error",
+            sequence,
+            message: event.error.message
+          };
+          sequence += 1;
+          socket.close(1011, "upstream error");
+          return;
+        }
+
+        if (event.type === "close") {
+          if (!completed) {
+            yield {
+              type: "error",
+              sequence,
+              message: `MiniMax upstream WebSocket closed before completion: ${event.code} ${event.reason}`.trim()
+            };
+          }
+          return;
+        }
+
+        const upstreamPayload = parseJsonFrame(event.data);
+        const upstreamEvent = typeof upstreamPayload.event === "string" ? upstreamPayload.event : "unknown";
+        yield {
+          type: "metadata",
+          sequence,
+          payload: {
+            upstreamEvent,
+            upstreamPayload
+          }
+        };
+        sequence += 1;
+
+        if (upstreamEvent === "connected_success" && !sentStart) {
+          socket.send(JSON.stringify(startTask));
+          sentStart = true;
+          yield {
+            type: "metadata",
+            sequence,
+            payload: {
+              upstreamEvent: "task_start.sent"
+            }
+          };
+          sequence += 1;
+          continue;
+        }
+
+        if (upstreamEvent === "task_started" && !sentText) {
+          socket.send(JSON.stringify(continueTask));
+          sentText = true;
+          yield {
+            type: "metadata",
+            sequence,
+            payload: {
+              upstreamEvent: "task_continue.sent"
+            }
+          };
+          sequence += 1;
+        }
+
+        const audio = audioHexFromStreamPayload(upstreamPayload);
+        if (audio !== undefined) {
+          yield {
+            type: "audio.chunk",
+            sequence,
+            data: Uint8Array.from(Buffer.from(audio, "hex")),
+            format
+          };
+          sequence += 1;
+        }
+
+        if (isMiniMaxStreamFailure(upstreamPayload)) {
+          yield {
+            type: "error",
+            sequence,
+            message: miniMaxStreamErrorMessage(upstreamPayload)
+          };
+          socket.close(1011, "task failed");
+          return;
+        }
+
+        if (upstreamPayload.is_final === true || upstreamEvent === "task_finished") {
+          socket.send(JSON.stringify(finishTask));
+          completed = true;
+          yield {
+            type: "session.completed",
+            sequence
+          };
+          socket.close(1000, "completed");
+          return;
+        }
+      }
+    } finally {
+      if (!completed) {
+        socket?.close(1000, "stream generator closed");
+      }
+      events.end();
+    }
   }
 
   // createVoiceClone: 入参为音色克隆 plan；执行上传/复刻 workflow 并返回 voice registry 记录。
@@ -858,6 +1019,166 @@ function sampleRateFromVendor(vendorRequest: VendorPayload, vendorResponse: Vend
   }
   const audioSetting = objectAt(vendorRequest, "audio_setting");
   return typeof audioSetting.sample_rate === "number" ? audioSetting.sample_rate : 32000;
+}
+
+// streamStartTask: 入参为已审计 vendor request；输出 MiniMax WebSocket task_start 帧。
+function streamStartTask(vendorRequest: VendorPayload): VendorPayload {
+  const { text: _text, stream: _stream, ...rest } = vendorRequest;
+  return {
+    ...rest,
+    event: "task_start"
+  };
+}
+
+// streamContinueTask: 入参为已审计 vendor request；输出 MiniMax WebSocket task_continue 文本帧。
+function streamContinueTask(vendorRequest: VendorPayload): VendorPayload {
+  return {
+    event: "task_continue",
+    text: typeof vendorRequest.text === "string" ? vendorRequest.text : ""
+  };
+}
+
+// streamFinishTask: 无入参；输出 MiniMax WebSocket task_finish 收尾帧。
+function streamFinishTask(): VendorPayload {
+  return {
+    event: "task_finish"
+  };
+}
+
+// audioHexFromStreamPayload: 入参为 MiniMax 上游帧；输出 data.audio 中的 hex 音频片段。
+function audioHexFromStreamPayload(payload: VendorPayload): string | undefined {
+  const data = objectAt(payload, "data");
+  return typeof data.audio === "string" && data.audio.length > 0 ? data.audio : undefined;
+}
+
+// isMiniMaxStreamFailure: 入参为 MiniMax 上游帧；输出该帧是否表示业务失败。
+function isMiniMaxStreamFailure(payload: VendorPayload): boolean {
+  if (payload.event === "task_failed" || payload.event === "error") {
+    return true;
+  }
+  const baseResp = objectAt(payload, "base_resp");
+  return typeof baseResp.status_code === "number" && baseResp.status_code !== 0;
+}
+
+// miniMaxStreamErrorMessage: 入参为 MiniMax 上游失败帧；输出可读错误消息。
+function miniMaxStreamErrorMessage(payload: VendorPayload): string {
+  if (typeof payload.message === "string" && payload.message.length > 0) {
+    return payload.message;
+  }
+  if (typeof payload.error === "string" && payload.error.length > 0) {
+    return payload.error;
+  }
+  const baseResp = objectAt(payload, "base_resp");
+  if (typeof baseResp.status_msg === "string" && baseResp.status_msg.length > 0) {
+    return baseResp.status_msg;
+  }
+  return "MiniMax upstream task failed.";
+}
+
+// rawDataToBytes: 入参为 WebSocket 原始数据；输出统一的字节数组。
+function rawDataToBytes(data: RawData): Uint8Array {
+  if (Buffer.isBuffer(data)) {
+    return new Uint8Array(data);
+  }
+  if (data instanceof ArrayBuffer) {
+    return new Uint8Array(data);
+  }
+  if (Array.isArray(data)) {
+    return new Uint8Array(Buffer.concat(data));
+  }
+  return new Uint8Array(Buffer.from(String(data)));
+}
+
+// parseJsonFrame: 入参为 WebSocket 原始帧；输出对象化的 MiniMax 上游 payload。
+function parseJsonFrame(data: RawData): VendorPayload {
+  const text = Buffer.from(rawDataToBytes(data)).toString("utf8");
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as VendorPayload)
+      : { value: parsed };
+  } catch {
+    return {
+      raw: text
+    };
+  }
+}
+
+type MiniMaxUpstreamEvent =
+  | {
+      type: "open";
+    }
+  | {
+      type: "message";
+      data: RawData;
+      isBinary: boolean;
+    }
+  | {
+      type: "error";
+      error: Error;
+    }
+  | {
+      type: "close";
+      code: number;
+      reason: string;
+    };
+
+// AsyncEventQueue: 用于把 WebSocket 回调事件转换为 async iterator，便于 adapter 产出 TTSStreamEvent。
+class AsyncEventQueue<TEvent> implements AsyncIterable<TEvent> {
+  private readonly pending: TEvent[] = [];
+  private readonly waiters: Array<(result: IteratorResult<TEvent>) => void> = [];
+  private closed = false;
+
+  // push: 入参为回调事件；功能是推入队列或唤醒等待中的 async iterator。
+  push(event: TEvent): void {
+    const waiter = this.waiters.shift();
+    if (waiter !== undefined) {
+      waiter({
+        done: false,
+        value: event
+      });
+      return;
+    }
+    this.pending.push(event);
+  }
+
+  // end: 无入参；功能是关闭队列并结束所有等待中的 async iterator。
+  end(): void {
+    this.closed = true;
+    for (const waiter of this.waiters.splice(0)) {
+      waiter({
+        done: true,
+        value: undefined
+      });
+    }
+  }
+
+  // next: 无入参；输出 async iterator 的下一个事件。
+  private next(): Promise<IteratorResult<TEvent>> {
+    const event = this.pending.shift();
+    if (event !== undefined) {
+      return Promise.resolve({
+        done: false,
+        value: event
+      });
+    }
+    if (this.closed) {
+      return Promise.resolve({
+        done: true,
+        value: undefined
+      });
+    }
+    return new Promise((resolve) => {
+      this.waiters.push(resolve);
+    });
+  }
+
+  // Symbol.asyncIterator: 无入参；输出当前队列的 async iterator。
+  [Symbol.asyncIterator](): AsyncIterator<TEvent> {
+    return {
+      next: () => this.next()
+    };
+  }
 }
 
 // toJsonValue: 入参为 unknown；输出可安全写入 TTSError details 和 JSON archive 的 JsonValue。
