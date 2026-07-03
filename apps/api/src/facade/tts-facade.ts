@@ -1,6 +1,9 @@
 import {
   TTSError,
+  type TTSAdapter,
   type TTSCapabilities,
+  type TTSStreamEvent,
+  type TTSStreamPlan,
   type TTSSyncRequest,
   type TTSSyncResult,
   type TTSStreamRequest,
@@ -52,25 +55,37 @@ export class TTSFacade {
     });
   }
 
-  async synthesizeStream(_request: TTSStreamRequest): Promise<TTSStreamSession> {
-    const request = _request;
-    const adapter = this.registry.getOrThrow(request.providerId);
-    const plan = await adapter.plan(request);
+  // prepareStream: 入参为流式合成请求；输出已 plan 的 stream session 执行上下文。
+  async prepareStream(request: TTSStreamRequest): Promise<TTSPreparedStreamSession> {
+    const resolvedRequest = this.resolveVoiceSelection(request);
+    const adapter = this.registry.getOrThrow(resolvedRequest.providerId);
+    const plan = await adapter.plan(resolvedRequest);
 
     if (plan.operation !== "tts.stream" || adapter.synthesizeStream === undefined) {
       throw new TTSError(
-        `Provider '${request.providerId}' does not support tts.stream.`,
+        `Provider '${resolvedRequest.providerId}' does not support tts.stream.`,
         "operation_not_supported",
         400
       );
     }
 
+    const streamAdapter: TTSStreamAdapter = adapter as TTSStreamAdapter;
     return {
-      sessionId: plan.planId,
-      providerId: request.providerId,
-      operation: "tts.stream",
-      protocol: request.stream?.protocol ?? "websocket"
+      request: resolvedRequest,
+      plan,
+      adapter: streamAdapter,
+      session: {
+        sessionId: plan.planId,
+        providerId: resolvedRequest.providerId,
+        operation: "tts.stream",
+        protocol: resolvedRequest.stream?.protocol ?? "websocket"
+      }
     };
+  }
+
+  async synthesizeStream(request: TTSStreamRequest): Promise<TTSStreamSession> {
+    const prepared = await this.prepareStream(request);
+    return prepared.session;
   }
 
   async createVoiceClone(request: VoiceCloneRequest): Promise<VoiceCloneResult> {
@@ -129,7 +144,7 @@ export class TTSFacade {
   }
 
   // resolveVoiceSelection: 入参为同步合成请求；功能是把平台 voiceId 解析为厂商 providerVoiceId。
-  private resolveVoiceSelection(request: TTSSyncRequest): TTSSyncRequest {
+  private resolveVoiceSelection<TRequest extends TTSSyncRequest | TTSStreamRequest>(request: TRequest): TRequest {
     const localVoiceId = request.voice.voiceId;
     if (localVoiceId === undefined) {
       return request;
@@ -153,6 +168,17 @@ export class TTSFacade {
         ...request.voice,
         providerVoiceId: voice.providerVoiceId
       }
-    };
+    } as TRequest;
   }
+}
+
+export interface TTSStreamAdapter extends TTSAdapter {
+  synthesizeStream(plan: TTSStreamPlan): AsyncIterable<TTSStreamEvent>;
+}
+
+export interface TTSPreparedStreamSession {
+  session: TTSStreamSession;
+  request: TTSStreamRequest;
+  plan: TTSStreamPlan;
+  adapter: TTSStreamAdapter;
 }

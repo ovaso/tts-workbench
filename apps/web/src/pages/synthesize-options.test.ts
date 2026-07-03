@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { TTSCapabilities } from "@tts-platform/core";
+import type { TTSCapabilities, TTSVendorModel } from "@tts-platform/core";
 import {
   defaultFormatForModel,
   defaultLanguageForModel,
@@ -10,7 +10,9 @@ import {
   languageOptionsForModel,
   modelById,
   modelOptions,
+  requiresExplicitVoiceForModel,
   sampleRateOptionsForModel,
+  supportsOperation,
   vendorExtensionTemplateForOperation,
   voiceOptions
 } from "./synthesize-options";
@@ -98,6 +100,8 @@ describe("synthesize options", () => {
 
     expect(modelOptions(capabilities)).toEqual([{ title: "Demo Model", value: "demo-model" }]);
     expect(defaultModelForOperation(capabilities, "tts.sync")).toBe("demo-model");
+    expect(supportsOperation(capabilities, model, "tts.sync")).toBe(true);
+    expect(supportsOperation(capabilities, model, "tts.stream")).toBe(false);
     expect(formatOptionsForModel(model)).toEqual(["mp3", "wav"]);
     expect(sampleRateOptionsForModel(model)).toEqual([24000, 32000]);
     expect(languageOptionsForModel(model)).toEqual([
@@ -108,6 +112,22 @@ describe("synthesize options", () => {
     expect(defaultSampleRateForModel(model)).toBe(32000);
     expect(defaultLanguageForModel(model)).toBe("Chinese");
     expect(defaultVoicePlaceholderForModel(model)).toBe("默认：demo-default-voice");
+    expect(requiresExplicitVoiceForModel(model)).toBe(false);
+  });
+
+  it("marks models without a default voice as requiring explicit voice input", () => {
+    const model: TTSVendorModel = {
+      modelId: "cosyvoice-v3.5-plus",
+      canonicalCapabilities: {
+        supportsText: true,
+        supportsSSML: true,
+        supportedOperations: ["tts.sync"],
+        canonicalControls: {}
+      }
+    };
+
+    expect(defaultVoicePlaceholderForModel(model)).toBe("必填：输入或选择音色 ID");
+    expect(requiresExplicitVoiceForModel(model)).toBe(true);
   });
 
   it("builds a full vendor extension template from operation schema", () => {
@@ -122,19 +142,33 @@ describe("synthesize options", () => {
     });
   });
 
-  it("builds cloned voice options from voice registry records", () => {
+  it("builds model-scoped cloned voice options from voice registry records", () => {
     expect(
-      voiceOptions([
-        {
-          voiceId: "demo:voice_1",
-          providerId: "demo",
-          providerVoiceId: "voice_1",
-          displayName: "Voice One",
-          source: "cloned",
-          createdAt: "2026-07-03T00:00:00.000Z",
-          sourceOperation: "voice.clone.create"
-        }
-      ])
+      voiceOptions(
+        [
+          {
+            voiceId: "demo:voice_1",
+            providerId: "demo",
+            providerVoiceId: "voice_1",
+            displayName: "Voice One",
+            source: "cloned",
+            modelId: "demo-model",
+            createdAt: "2026-07-03T00:00:00.000Z",
+            sourceOperation: "voice.clone.create"
+          },
+          {
+            voiceId: "demo:voice_2",
+            providerId: "demo",
+            providerVoiceId: "voice_2",
+            displayName: "Voice Two",
+            source: "cloned",
+            modelId: "other-model",
+            createdAt: "2026-07-03T00:00:00.000Z",
+            sourceOperation: "voice.clone.create"
+          }
+        ],
+        "demo-model"
+      )
     ).toEqual([
       {
         title: "Voice One (voice_1)",

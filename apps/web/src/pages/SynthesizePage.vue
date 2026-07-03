@@ -19,6 +19,18 @@
     <div class="work-grid">
       <div class="work-panel pa-4">
         <ProviderSelector v-model="providerId" :providers="store.providers" />
+        <v-btn-toggle
+          v-model="operationMode"
+          v-if="supportsSyncOperation || supportsStreamOperation"
+          class="mb-4"
+          color="primary"
+          divided
+          mandatory
+          variant="outlined"
+        >
+          <v-btn v-if="supportsSyncOperation" value="sync" prepend-icon="mdi-file-music">同步</v-btn>
+          <v-btn v-if="supportsStreamOperation" value="stream" prepend-icon="mdi-access-point">流式</v-btn>
+        </v-btn-toggle>
         <v-textarea v-model="text" auto-grow label="文本" rows="5" variant="outlined" />
         <v-row>
           <v-col cols="12" md="6">
@@ -231,6 +243,7 @@
 import type {
   ArchivedRunSummary,
   TTSOutputFormat,
+  TTSStreamRequest,
   TTSSyncRequest,
   VendorDirectiveMode,
   VendorPayload
@@ -242,7 +255,7 @@ import JsonViewer from "../components/JsonViewer.vue";
 import ProviderSelector from "../components/ProviderSelector.vue";
 import VendorExtensionEditor from "../components/VendorExtensionEditor.vue";
 import { getRun, listRuns, type RunDetail } from "../api/runs";
-import { synthesizeSync } from "../api/tts";
+import { synthesizeStream, synthesizeSync, ttsStreamSocketUrl } from "../api/tts";
 import { listVoices } from "../api/voices";
 import { useProvidersStore } from "../stores/providers";
 import { formatLocalDateTime } from "../utils/time";
@@ -256,7 +269,9 @@ import {
   languageOptionsForModel,
   modelById,
   modelOptions,
+  requiresExplicitVoiceForModel,
   sampleRateOptionsForModel,
+  supportsOperation,
   vendorExtensionTemplateForOperation,
   voiceOptions
 } from "./synthesize-options";
@@ -273,6 +288,7 @@ import { type ComboboxOption, voiceInputValue } from "./synthesize-submit";
 const store = useProvidersStore();
 
 const providerId = ref("minimax");
+const operationMode = ref<"sync" | "stream">("sync");
 const text = ref("你好，这是一次语音合成测试。");
 const model = ref("");
 const voiceIdInput = ref<string | ComboboxOption | null>("");
@@ -311,6 +327,10 @@ const vendorModeItems: Array<{ title: string; value: VendorDirectiveMode }> = [
 const runDetailTabItems = runDetailTabs();
 const currentCapabilities = computed(() => store.capabilities[providerId.value]);
 const currentModel = computed(() => modelById(currentCapabilities.value, model.value));
+const supportsSyncOperation = computed(() => supportsOperation(currentCapabilities.value, currentModel.value, "tts.sync"));
+const supportsStreamOperation = computed(() =>
+  supportsOperation(currentCapabilities.value, currentModel.value, "tts.stream")
+);
 const modelItems = computed(() => modelOptions(currentCapabilities.value));
 const formats = computed(() => formatOptionsForModel(currentModel.value));
 const sampleRates = computed(() => sampleRateOptionsForModel(currentModel.value));
@@ -337,6 +357,7 @@ watch(
       return;
     }
     try {
+      voiceIdInput.value = "";
       const capabilities = await store.loadCapabilities(nextProviderId);
       applyProviderDefaults(capabilities);
       applyVendorExtensionTemplate();
@@ -350,9 +371,17 @@ watch(
   }
 );
 
-watch(model, () => {
+watch(model, async () => {
+  voiceIdInput.value = "";
   applyModelDefaults();
   applyVendorExtensionTemplate();
+  if (providerId.value.length > 0) {
+    try {
+      await loadVoiceOptions(providerId.value);
+    } catch (caught) {
+      error.value = caught instanceof Error ? caught.message : "加载音色列表失败。";
+    }
+  }
 });
 
 async function submit() {
@@ -362,6 +391,15 @@ async function submit() {
     const vendorParams = parseVendorParams();
     const voice: TTSSyncRequest["voice"] = {};
     const selectedVoice = voiceInputValue(voiceIdInput.value);
+    if (selectedVoice.length === 0 && requiresExplicitVoiceForModel(currentModel.value)) {
+      throw new Error("当前模型需要填写音色 ID。请在音色 ID 中输入 CosyVoice voice_id，或先到音色管理登记/复刻音色。");
+    }
+    if (operationMode.value === "stream" && !supportsStreamOperation.value) {
+      throw new Error("当前厂商或模型不支持流式合成。");
+    }
+    if (operationMode.value === "sync" && !supportsSyncOperation.value) {
+      throw new Error("当前厂商或模型不支持同步合成。");
+    }
     if (selectedVoice.length > 0 && knownVoiceIds.value.has(selectedVoice)) {
       voice.voiceId = selectedVoice;
     } else if (selectedVoice.length > 0) {
@@ -371,8 +409,8 @@ async function submit() {
       voice.language = language.value;
     }
 
-    const request: TTSSyncRequest = {
-      operation: "tts.sync",
+    const request: TTSSyncRequest | TTSStreamRequest = {
+      operation: operationMode.value === "stream" ? "tts.stream" : "tts.sync",
       providerId: providerId.value,
       text: text.value,
       model: model.value,
@@ -398,17 +436,83 @@ async function submit() {
       };
     }
 
-    const result = await synthesizeSync(request);
-    await loadRuns();
-    if (!expandedRunIds.value.includes(result.runId)) {
-      expandedRunIds.value = [result.runId, ...expandedRunIds.value];
+    if (operationMode.value === "stream") {
+      await runStreamSynthesis(request as TTSStreamRequest);
+      return;
     }
-    await loadRunDetail(result.runId);
+
+    const result = await synthesizeSync(request as TTSSyncRequest);
+    await loadRuns();
+    await expandAndLoadRun(result.runId);
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : "语音合成失败。";
   } finally {
     submitting.value = false;
   }
+}
+
+// runStreamSynthesis: 入参为流式请求；功能是创建 stream session、连接下游 WS 并在完成后刷新归档记录。
+async function runStreamSynthesis(request: TTSStreamRequest) {
+  const session = await synthesizeStream(request);
+  await waitForStreamCompletion(ttsStreamSocketUrl(session));
+  await loadRuns();
+  const latestStreamRun = runs.value.find((run) => run.operation === "tts.stream" && run.providerId === providerId.value);
+  if (latestStreamRun !== undefined) {
+    await expandAndLoadRun(latestStreamRun.runId);
+  }
+}
+
+// waitForStreamCompletion: 入参为 WebSocket URL；输出流式合成完成或失败的 Promise。
+function waitForStreamCompletion(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(url);
+    let completed = false;
+
+    socket.addEventListener("open", () => {
+      socket.send(JSON.stringify({ type: "client.ready" }));
+    });
+    socket.addEventListener("message", (event) => {
+      if (typeof event.data !== "string") {
+        return;
+      }
+      const payload = parseStreamEvent(event.data);
+      if (payload.type === "error") {
+        reject(new Error(typeof payload.message === "string" ? payload.message : "流式合成失败。"));
+        socket.close();
+      }
+      if (payload.type === "session.completed") {
+        completed = true;
+      }
+    });
+    socket.addEventListener("error", () => {
+      reject(new Error("流式合成 WebSocket 连接失败。"));
+    });
+    socket.addEventListener("close", () => {
+      if (completed) {
+        resolve();
+      } else {
+        reject(new Error("流式合成连接在完成前关闭。"));
+      }
+    });
+  });
+}
+
+// parseStreamEvent: 入参为 WebSocket 文本帧；输出可判断类型的事件对象。
+function parseStreamEvent(raw: string): { type?: unknown; message?: unknown } {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+// expandAndLoadRun: 入参为 runId；功能是展开指定 run 并加载详情。
+async function expandAndLoadRun(runId: string) {
+  if (!expandedRunIds.value.includes(runId)) {
+    expandedRunIds.value = [runId, ...expandedRunIds.value];
+  }
+  await loadRunDetail(runId);
 }
 
 // handleExpandedRuns: 入参为当前展开 runId 数组；功能是支持多个 expansion panel 同时展开并补充加载详情。
@@ -461,7 +565,9 @@ async function loadRunDetail(runId: string) {
 
 // applyProviderDefaults: 入参为 provider capability；功能是选择默认模型并刷新模型相关表单默认值。
 function applyProviderDefaults(capabilities: typeof currentCapabilities.value) {
-  const nextModel = defaultModelForOperation(capabilities, "tts.sync");
+  const preferredOperation =
+    operationMode.value === "stream" && capabilities?.operations["tts.stream"]?.supported === true ? "tts.stream" : "tts.sync";
+  const nextModel = defaultModelForOperation(capabilities, preferredOperation);
   if (nextModel.length > 0) {
     model.value = nextModel;
   }
@@ -470,6 +576,12 @@ function applyProviderDefaults(capabilities: typeof currentCapabilities.value) {
 
 // applyModelDefaults: 无入参；功能是根据当前模型刷新格式、采样率和语言默认值。
 function applyModelDefaults() {
+  if (operationMode.value === "stream" && !supportsStreamOperation.value) {
+    operationMode.value = "sync";
+  }
+  if (operationMode.value === "sync" && !supportsSyncOperation.value && supportsStreamOperation.value) {
+    operationMode.value = "stream";
+  }
   const nextFormat = defaultFormatForModel(currentModel.value);
   if (nextFormat !== undefined) {
     format.value = nextFormat;
@@ -494,9 +606,12 @@ function applyVendorExtensionTemplate() {
 
 // loadVoiceOptions: 入参为 providerId；功能是加载本地已克隆音色并刷新合成页音色候选。
 async function loadVoiceOptions(nextProviderId: string) {
-  const voices = await listVoices({ providerId: nextProviderId });
+  const voices = await listVoices({
+    providerId: nextProviderId,
+    ...(model.value.length === 0 ? {} : { modelId: model.value })
+  });
   knownVoiceIds.value = new Set(voices.map((voice) => voice.voiceId));
-  voiceItems.value = voiceOptions(voices);
+  voiceItems.value = voiceOptions(voices, model.value);
 }
 
 // loadRuns: 无入参；功能是刷新语音合成页面下方的同步合成记录。

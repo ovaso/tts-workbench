@@ -1,8 +1,8 @@
 import type { ArchivedRunSummary } from "@tts-platform/core";
 
-// syncSynthesisRuns: 入参为跨 operation 运行摘要；输出语音合成页面展示的同步合成记录。
+// syncSynthesisRuns: 入参为跨 operation 运行摘要；输出语音合成页面展示的合成记录。
 export function syncSynthesisRuns(runs: ArchivedRunSummary[]): ArchivedRunSummary[] {
-  return runs.filter((run) => run.operation === "tts.sync");
+  return runs.filter((run) => run.operation === "tts.sync" || run.operation === "tts.stream");
 }
 
 // runAudioTitle: 入参为运行摘要；输出语音合成记录中的音频信息。

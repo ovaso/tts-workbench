@@ -1,5 +1,10 @@
 import type { TTSCapabilities, VoiceCloneCapability } from "@tts-platform/core";
 
+// shouldUseStreamVoiceTest: 入参为音色 providerId；输出音色测试是否应走流式合成链路。
+export function shouldUseStreamVoiceTest(providerId: string): boolean {
+  return providerId === "cosyvoice";
+}
+
 // persistentVoiceCloneCapability: 入参为厂商 capability；输出持久音色复刻的能力详情。
 export function persistentVoiceCloneCapability(
   capabilities: TTSCapabilities | undefined

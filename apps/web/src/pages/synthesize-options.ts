@@ -43,6 +43,18 @@ export function modelById(
   return capabilities?.vendorModels.find((model) => model.modelId === modelId);
 }
 
+// supportsOperation: 入参为厂商能力、模型和 operation；输出当前页面是否应开放该 operation。
+export function supportsOperation(
+  capabilities: TTSCapabilities | undefined,
+  model: TTSVendorModel | undefined,
+  operation: TTSOperation
+): boolean {
+  return (
+    capabilities?.operations[operation]?.supported === true &&
+    model?.canonicalCapabilities.supportedOperations.includes(operation) === true
+  );
+}
+
 // formatOptionsForModel: 入参为 vendor model；输出该模型支持的编码格式选项。
 export function formatOptionsForModel(model: TTSVendorModel | undefined): TTSOutputFormat[] {
   return model?.canonicalCapabilities.outputFormats ?? [];
@@ -84,12 +96,17 @@ export function defaultLanguageForModel(model: TTSVendorModel | undefined): stri
 // defaultVoicePlaceholderForModel: 入参为 vendor model；输出默认音色提示文本，不代表用户已显式选择。
 export function defaultVoicePlaceholderForModel(model: TTSVendorModel | undefined): string {
   const voiceId = model?.defaultConfiguration?.voice?.providerVoiceId;
-  return voiceId === undefined ? "留空使用厂商默认音色" : `默认：${voiceId}`;
+  return voiceId === undefined ? "必填：输入或选择音色 ID" : `默认：${voiceId}`;
 }
 
-// voiceOptions: 入参为本地 voice registry 音色列表；输出合成页可选的音色选项。
-export function voiceOptions(voices: VoiceRecord[]): SelectOption<string>[] {
-  return voices.map((voice) => ({
+// requiresExplicitVoiceForModel: 入参为 vendor model；输出该模型是否必须由用户显式提供音色。
+export function requiresExplicitVoiceForModel(model: TTSVendorModel | undefined): boolean {
+  return model?.defaultConfiguration?.voice?.providerVoiceId === undefined;
+}
+
+// voiceOptions: 入参为本地 voice registry 音色列表和当前模型；输出合成页按模型过滤后的音色选项。
+export function voiceOptions(voices: VoiceRecord[], modelId?: string): SelectOption<string>[] {
+  return voices.filter((voice) => voice.modelId === undefined || voice.modelId === modelId).map((voice) => ({
     title: `${voice.displayName} (${voice.providerVoiceId})`,
     value: voice.voiceId
   }));

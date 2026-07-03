@@ -137,7 +137,7 @@
 
           <div class="work-panel pa-4">
             <AudioPlayer
-              v-if="testResult?.audio.url"
+              v-if="testResult?.audio?.url"
               :src="testResult.audio.url"
               :format="testResult.audio.format"
             />
@@ -262,6 +262,8 @@
 
 <script setup lang="ts">
 import type {
+  ArchivedRunSummary,
+  TTSStreamRequest,
   TTSSyncRequest,
   TTSSyncResult,
   VendorDirectiveMode,
@@ -271,7 +273,8 @@ import type {
   VoiceRecord
 } from "@tts-platform/core";
 import { computed, onMounted, ref, watch } from "vue";
-import { synthesizeSync } from "../api/tts";
+import { getRun, listRuns } from "../api/runs";
+import { synthesizeStream, synthesizeSync, ttsStreamSocketUrl } from "../api/tts";
 import { createVoice, createVoiceClone, deleteVoice, listVoices } from "../api/voices";
 import AudioPlayer from "../components/AudioPlayer.vue";
 import AutoScrollText from "../components/AutoScrollText.vue";
@@ -281,6 +284,7 @@ import { useProvidersStore } from "../stores/providers";
 import {
   persistentVoiceCloneCapability,
   referenceAudioSummary,
+  shouldUseStreamVoiceTest,
   voiceCloneSupportText
 } from "./voice-clone-options";
 import {
@@ -324,7 +328,7 @@ const manualLanguage = ref("");
 const manualSource = ref<VoiceCreateRequest["source"]>("external");
 const testVoiceId = ref("");
 const testText = ref("这是一段用于验证受控音色的合成测试文本。");
-const testResult = ref<TTSSyncResult | null>(null);
+const testResult = ref<TTSSyncResult | ArchivedRunSummary | null>(null);
 
 const sourceItems: Array<{ title: string; value: VoiceCreateRequest["source"] }> = [
   { title: "外部控制台音色", value: "external" },
@@ -543,7 +547,7 @@ async function submitDeleteVoice(voice: VoiceRecord) {
   }
 }
 
-// submitVoiceTest: 无入参；功能是使用受控音色提交一次同步 TTS 合成并保存测试结果。
+// submitVoiceTest: 无入参；功能是使用受控音色提交一次 TTS 合成测试；CosyVoice 无 Workspace 场景走流式链路。
 async function submitVoiceTest() {
   error.value = "";
   success.value = "";
@@ -554,10 +558,16 @@ async function submitVoiceTest() {
     if (selectedVoice === undefined) {
       throw new Error("请选择受控音色。");
     }
+    if (shouldUseStreamVoiceTest(selectedVoice.providerId)) {
+      testResult.value = await runCosyVoiceStreamVoiceTest(selectedVoice);
+      success.value = `合成测试完成：${testResult.value.runId}`;
+      return;
+    }
     const request: TTSSyncRequest = {
       operation: "tts.sync",
       providerId: selectedVoice.providerId,
       text: testText.value.trim(),
+      ...(selectedVoice.modelId === undefined ? {} : { model: selectedVoice.modelId }),
       voice: {
         voiceId: testVoiceId.value
       }
@@ -569,6 +579,81 @@ async function submitVoiceTest() {
   } finally {
     testingVoice.value = false;
   }
+}
+
+// runCosyVoiceStreamVoiceTest: 入参为受控音色；功能是用 CosyVoice 流式合成完成音色测试并读取归档结果。
+async function runCosyVoiceStreamVoiceTest(selectedVoice: VoiceRecord): Promise<ArchivedRunSummary> {
+  const request: TTSStreamRequest = {
+    operation: "tts.stream",
+    providerId: selectedVoice.providerId,
+    text: testText.value.trim(),
+    ...(selectedVoice.modelId === undefined ? {} : { model: selectedVoice.modelId }),
+    voice: {
+      voiceId: selectedVoice.voiceId
+    },
+    stream: {
+      protocol: "websocket"
+    }
+  };
+  const session = await synthesizeStream(request);
+  await waitForVoiceTestStreamCompletion(ttsStreamSocketUrl(session));
+  const latestRun = await latestStreamRunForVoice(selectedVoice);
+  if (latestRun === undefined) {
+    throw new Error("流式音色测试已完成，但未找到对应运行归档。");
+  }
+  const detail = await getRun(latestRun.runId);
+  return detail.result;
+}
+
+// waitForVoiceTestStreamCompletion: 入参为 WebSocket URL；功能是等待音色测试流式 session 完成。
+function waitForVoiceTestStreamCompletion(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(url);
+    let completed = false;
+
+    socket.addEventListener("open", () => {
+      socket.send(JSON.stringify({ type: "client.ready" }));
+    });
+    socket.addEventListener("message", (event) => {
+      if (typeof event.data !== "string") {
+        return;
+      }
+      const payload = parseVoiceTestStreamEvent(event.data);
+      if (payload.type === "error") {
+        reject(new Error(typeof payload.message === "string" ? payload.message : "流式音色测试失败。"));
+        socket.close();
+      }
+      if (payload.type === "session.completed") {
+        completed = true;
+      }
+    });
+    socket.addEventListener("error", () => {
+      reject(new Error("流式音色测试 WebSocket 连接失败。"));
+    });
+    socket.addEventListener("close", () => {
+      if (completed) {
+        resolve();
+      } else {
+        reject(new Error("流式音色测试连接在完成前关闭。"));
+      }
+    });
+  });
+}
+
+// parseVoiceTestStreamEvent: 入参为 WebSocket 文本帧；输出音色测试可识别的事件对象。
+function parseVoiceTestStreamEvent(raw: string): { type?: unknown; message?: unknown } {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+// latestStreamRunForVoice: 入参为受控音色；功能是寻找该厂商最近一次流式音色测试归档。
+async function latestStreamRunForVoice(selectedVoice: VoiceRecord): Promise<ArchivedRunSummary | undefined> {
+  const runs = await listRuns();
+  return runs.find((run) => run.operation === "tts.stream" && run.providerId === selectedVoice.providerId);
 }
 
 // submitClone: 无入参；功能是提交参考音频复刻请求并把返回音色纳入受控 registry。

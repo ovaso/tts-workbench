@@ -12,7 +12,7 @@ export function mockCapabilities(adapterVersion = MOCK_ADAPTER_VERSION): TTSCapa
     adapterVersion,
     vendorFeatures: {
       supportsHttpTTS: true,
-      supportsStreamingTTS: false,
+      supportsStreamingTTS: true,
       supportsPersistentVoiceClone: false,
       supportsInstantVoiceClone: false,
       supportsVoiceCloneDelete: false
@@ -22,11 +22,11 @@ export function mockCapabilities(adapterVersion = MOCK_ADAPTER_VERSION): TTSCapa
         modelId: "mock-tts-v1",
         displayName: "Mock TTS v1",
         description: "Local sine-wave model used for facade and archive validation.",
-        defaultForOperations: ["tts.sync"],
+        defaultForOperations: ["tts.sync", "tts.stream"],
         canonicalCapabilities: {
           supportsText: true,
           supportsSSML: false,
-          supportedOperations: ["tts.sync"],
+          supportedOperations: ["tts.sync", "tts.stream"],
           outputFormats: ["wav"],
           sampleRatesHz: [16000, 24000, 48000],
           maxTextChars: 10000,
@@ -127,18 +127,31 @@ export function mockCapabilities(adapterVersion = MOCK_ADAPTER_VERSION): TTSCapa
       },
       "tts.stream": {
         operation: "tts.stream",
-        supported: false,
+        supported: true,
         transportProtocols: ["websocket", "sse", "http_chunk"],
-        inputModes: ["text_once", "text_incremental"],
-        outputFormats: ["wav", "pcm"],
-        outputChunkFormats: ["pcm"],
-        sampleRatesHz: [16000, 24000],
+        inputModes: ["text_once"],
+        outputFormats: ["wav"],
+        outputChunkFormats: ["wav"],
+        sampleRatesHz: [16000, 24000, 48000],
         maxTextChars: 10000,
         supportsTimestamps: false,
         supportsInterruption: false,
-        canonicalControls: {},
+        canonicalControls: {
+          speed: {
+            support: "supported",
+            min: 0.5,
+            max: 2,
+            defaultValue: 1
+          },
+          pitch: {
+            support: "approximated",
+            min: -12,
+            max: 12,
+            defaultValue: 0
+          }
+        },
         vendorExtensionSchema: mockExtensionSchema("tts.stream"),
-        notes: ["Contract is declared, but streaming execution is intentionally deferred."]
+        notes: ["Local mock stream emits a single WAV chunk for downstream WebSocket validation."]
       },
       "voice.clone.create": {
         operation: "voice.clone.create",

@@ -12,6 +12,9 @@ import {
   type TTSSyncProviderResult,
   type TTSSyncRequest,
   type TTSSyncResult,
+  type TTSStreamPlan,
+  type TTSStreamRequest,
+  type TTSStreamResult,
   type VoiceClonePlan,
   type VoiceCloneRequest,
   type VoiceCloneResult,
@@ -44,9 +47,23 @@ export interface ArchiveVoiceCloneInput {
   runId?: string;
 }
 
+export interface ArchiveStreamRunInput {
+  request: TTSStreamRequest;
+  plan: TTSStreamPlan;
+  audio?: {
+    data: Uint8Array;
+    format: TTSOutputFormat;
+    sampleRateHz: number;
+  };
+  vendorEvents: VendorPayload[];
+  vendorResponse: VendorPayload;
+  status?: "succeeded" | "failed";
+  runId?: string;
+}
+
 export interface StoredRunDetail {
-  result: TTSSyncResult;
-  request: TTSSyncRequest;
+  result: TTSSyncResult | TTSStreamResult;
+  request: TTSSyncRequest | TTSStreamRequest;
   plan: TTSPlan;
   mappingReport: MappingReport;
   vendorRequest: VendorPayload;
@@ -129,6 +146,56 @@ export class FileRunArchive {
     return input.providerResult;
   }
 
+  // writeStreamRun: 入参为流式执行结果；功能是保存流式 request、plan、events、最终响应和拼接音频。
+  async writeStreamRun(input: ArchiveStreamRunInput): Promise<TTSStreamResult> {
+    const runId = input.runId ?? createRunId();
+    assertSafeRunId(runId);
+
+    const directory = runRoot(this.dataRoot, runId);
+    await mkdir(directory, { recursive: true });
+
+    const files = [...ARCHIVE_FILES, "vendor-events.ndjson"];
+    let audio: AudioArtifact | undefined;
+    if (input.audio !== undefined) {
+      const audioFileName = `audio.${input.audio.format}`;
+      await writeFile(path.join(directory, audioFileName), input.audio.data);
+      audio = {
+        fileName: audioFileName,
+        format: input.audio.format,
+        sampleRateHz: input.audio.sampleRateHz,
+        byteLength: input.audio.data.byteLength,
+        url: `/v1/runs/${runId}/audio`
+      };
+      files.push(audioFileName);
+    }
+
+    const result: TTSStreamResult = {
+      runId,
+      providerId: input.request.providerId,
+      operation: "tts.stream",
+      status: input.status ?? "succeeded",
+      createdAt: new Date().toISOString(),
+      ...(audio === undefined ? {} : { audio }),
+      archive: {
+        runPath: `data/runs/${runId}`,
+        files
+      }
+    };
+
+    await writePrettyJson(path.join(directory, "request.json"), input.request);
+    await writePrettyJson(path.join(directory, "plan.json"), input.plan);
+    await writePrettyJson(path.join(directory, "mapping-report.json"), input.plan.mappingReport);
+    await writePrettyJson(path.join(directory, "vendor-request.json"), input.plan.vendorRequest);
+    await writeFile(
+      path.join(directory, "vendor-events.ndjson"),
+      input.vendorEvents.map((event) => JSON.stringify(event)).join("\n")
+    );
+    await writePrettyJson(path.join(directory, "vendor-response.json"), input.vendorResponse);
+    await writePrettyJson(path.join(directory, "result.json"), result);
+
+    return result;
+  }
+
   async listRuns(): Promise<ArchivedRunSummary[]> {
     await mkdir(runsRoot(this.dataRoot), { recursive: true });
     const entries = await readdir(runsRoot(this.dataRoot), { withFileTypes: true });
@@ -155,8 +222,8 @@ export class FileRunArchive {
     await assertRunExists(directory, runId);
 
     const [result, request, plan, mappingReport, vendorRequest, vendorResponse] = await Promise.all([
-      readJsonFile<TTSSyncResult>(path.join(directory, "result.json")),
-      readJsonFile<TTSSyncRequest>(path.join(directory, "request.json")),
+      readJsonFile<TTSSyncResult | TTSStreamResult>(path.join(directory, "result.json")),
+      readJsonFile<TTSSyncRequest | TTSStreamRequest>(path.join(directory, "request.json")),
       readJsonFile<TTSPlan>(path.join(directory, "plan.json")),
       readJsonFile<MappingReport>(path.join(directory, "mapping-report.json")),
       readJsonFile<VendorPayload>(path.join(directory, "vendor-request.json")),
@@ -175,6 +242,9 @@ export class FileRunArchive {
 
   async audioStream(runId: string): Promise<{ stream: NodeJS.ReadableStream; filePath: string }> {
     const detail = await this.readRun(runId);
+    if (detail.result.audio === undefined) {
+      throw new TTSError(`Run '${runId}' does not have an audio artifact.`, "invalid_request", 404);
+    }
     const filePath = path.join(runRoot(this.dataRoot, runId), detail.result.audio.fileName);
     await stat(filePath);
     return {

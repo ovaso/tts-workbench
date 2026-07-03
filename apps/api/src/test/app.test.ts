@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
+import type { RawData, WebSocket } from "ws";
 import { buildApp } from "../app";
 
 describe("api app", () => {
@@ -49,6 +50,11 @@ describe("api app", () => {
         {
           providerId: "minimax",
           providerName: "MiniMax",
+          adapterVersion: "0.1.0"
+        },
+        {
+          providerId: "cosyvoice",
+          providerName: "CosyVoice",
           adapterVersion: "0.1.0"
         }
       ]
@@ -131,6 +137,63 @@ describe("api app", () => {
       operation: "tts.stream",
       protocol: "websocket"
     });
+    expect(response.json().url).toMatch(/^\/v1\/tts\/stream\/plan_/);
+  });
+
+  it("pipes a mock stream session through the downstream websocket and archives it", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/tts/stream",
+      payload: {
+        providerId: "mock",
+        text: "hello websocket",
+        voice: {},
+        stream: {
+          protocol: "websocket",
+          chunkFormat: "wav"
+        },
+        vendor: {
+          mode: "prefer_vendor",
+          extensions: {
+            mock: {
+              schemaVersion: "1.0.0",
+              params: {
+                durationMs: 220,
+                toneHz: 550
+              }
+            }
+          }
+        }
+      }
+    });
+
+    expect(response.statusCode).toBe(201);
+    const session = response.json();
+    const ws = await app.injectWS(session.url);
+    const streamResult = collectWebSocketStream(ws);
+    ws.send(JSON.stringify({ type: "client.ready" }));
+
+    const received = await streamResult;
+    expect(received.jsonEvents.map((event) => event.type)).toEqual([
+      "session.started",
+      "metadata",
+      "session.completed"
+    ]);
+    expect(received.binaryBytes).toBeGreaterThan(44);
+
+    const runsResponse = await app.inject({
+      method: "GET",
+      url: "/v1/runs"
+    });
+    expect(runsResponse.statusCode).toBe(200);
+    const streamRun = runsResponse
+      .json()
+      .runs.find((run: { operation: string }) => run.operation === "tts.stream");
+    expect(streamRun).toMatchObject({
+      providerId: "mock",
+      operation: "tts.stream",
+      status: "succeeded"
+    });
   });
 
   it("lists persisted voices", async () => {
@@ -177,6 +240,52 @@ describe("api app", () => {
 
     expect(listResponse.json().voices).toHaveLength(1);
     expect(listResponse.json().voices[0].voiceId).toBe("minimax:external_voice_1");
+  });
+
+  it("filters managed voices by provider and model", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/v1/voices",
+      payload: {
+        providerId: "minimax",
+        providerVoiceId: "voice_hd",
+        displayName: "MiniMax HD Voice",
+        source: "external",
+        modelId: "speech-2.8-hd"
+      }
+    });
+    await app.inject({
+      method: "POST",
+      url: "/v1/voices",
+      payload: {
+        providerId: "minimax",
+        providerVoiceId: "voice_turbo",
+        displayName: "MiniMax Turbo Voice",
+        source: "external",
+        modelId: "speech-2.8-turbo"
+      }
+    });
+    await app.inject({
+      method: "POST",
+      url: "/v1/voices",
+      payload: {
+        providerId: "cosyvoice",
+        providerVoiceId: "voice_hd",
+        displayName: "CosyVoice HD Voice",
+        source: "external",
+        modelId: "cosyvoice-v3.5-plus"
+      }
+    });
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: "/v1/voices?providerId=minimax&modelId=speech-2.8-hd"
+    });
+
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json().voices.map((voice: { voiceId: string }) => voice.voiceId)).toEqual([
+      "minimax:voice_hd"
+    ]);
   });
 
   it("deletes a managed voice from the local voice registry", async () => {
@@ -321,3 +430,41 @@ describe("api app", () => {
     }
   });
 });
+
+function collectWebSocketStream(ws: WebSocket): Promise<{
+  jsonEvents: Array<{ type: string }>;
+  binaryBytes: number;
+}> {
+  return new Promise((resolve, reject) => {
+    const jsonEvents: Array<{ type: string }> = [];
+    let binaryBytes = 0;
+    const timeout = setTimeout(() => {
+      reject(new Error("Timed out waiting for websocket stream completion."));
+    }, 2000);
+
+    ws.on("message", (data: RawData, isBinary: boolean) => {
+      if (isBinary) {
+        binaryBytes += Buffer.isBuffer(data) ? data.byteLength : Buffer.byteLength(data.toString());
+        return;
+      }
+      const event = JSON.parse(data.toString()) as { type: string };
+      jsonEvents.push(event);
+    });
+    ws.on("close", () => {
+      clearTimeout(timeout);
+      const completed = jsonEvents.some((event) => event.type === "session.completed");
+      if (!completed) {
+        reject(new Error("Websocket closed before session.completed."));
+        return;
+      }
+      resolve({
+        jsonEvents,
+        binaryBytes
+      });
+    });
+    ws.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  });
+}

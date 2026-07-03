@@ -23,7 +23,9 @@ export default defineConfig({
         ...nodeBuiltins,
         "fastify",
         "@fastify/cors",
-        "@fastify/static"
+        "@fastify/static",
+        "@fastify/websocket",
+        "ws"
       ]
     }
   },

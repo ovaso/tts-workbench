@@ -15,9 +15,16 @@ export async function createVoiceClone(request: VoiceCloneRequest): Promise<Voic
   });
 }
 
-// listVoices: 入参为可选 voice 查询条件；功能是从 API 读取已保存的本地音色 registry。
+// listVoices: 入参为可选 provider/model 查询条件；功能是从 API 读取已保存的本地音色 registry。
 export async function listVoices(query: VoiceQuery = {}): Promise<VoiceRecord[]> {
-  const search = query.providerId === undefined ? "" : `?providerId=${encodeURIComponent(query.providerId)}`;
+  const searchParams = new URLSearchParams();
+  if (query.providerId !== undefined) {
+    searchParams.set("providerId", query.providerId);
+  }
+  if (query.modelId !== undefined) {
+    searchParams.set("modelId", query.modelId);
+  }
+  const search = searchParams.size === 0 ? "" : `?${searchParams.toString()}`;
   const response = await requestJson<{ voices: VoiceRecord[] }>(`/v1/voices${search}`);
   return response.voices;
 }

@@ -1,0 +1,28 @@
+{
+  "providerId": "cosyvoice",
+  "text": "家长您好，我们这边可以先给孩子安排一节免费的试听课。",
+  "model": "cosyvoice-v3.5-plus",
+  "voice": {
+    "providerVoiceId": "voice_id_from_create_voice"
+  },
+  "output": {
+    "format": "mp3",
+    "sampleRateHz": 24000
+  },
+  "controls": {
+    "volume": 50,
+    "speed": 1,
+    "pitch": 1
+  },
+  "vendor": {
+    "mode": "prefer_vendor",
+    "extensions": {
+      "cosyvoice": {
+        "schemaVersion": "1.0.0",
+        "params": {
+          "instruction": "用自然、亲切的客服语气朗读。"
+        }
+      }
+    }
+  }
+}

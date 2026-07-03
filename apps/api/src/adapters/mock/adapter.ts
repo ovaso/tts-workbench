@@ -7,12 +7,15 @@ import {
   type JsonValue,
   type MappingReport,
   type TTSAdapter,
+  type TTSStreamEvent,
+  type TTSStreamPlan,
   type TTSOperation,
   type TTSOperationRequest,
   type TTSVendorModel,
   type TTSSyncPlan,
   type TTSSyncProviderResult,
   type TTSSyncRequest,
+  type TTSStreamRequest,
   type VendorDirectiveMode,
   type VendorExtensionSchema,
   type VendorPayload
@@ -41,8 +44,13 @@ export class MockTTSAdapter implements TTSAdapter {
     return mockExtensionSchema(operation);
   }
 
-  async plan(request: TTSOperationRequest): Promise<TTSSyncPlan> {
-    if (request.operation !== "tts.sync") {
+  // plan: 入参为同步合成请求；输出 mock 同步 plan，并记录 canonical/vendor 映射报告。
+  async plan(request: TTSSyncRequest): Promise<TTSSyncPlan>;
+  // plan: 入参为流式合成请求；输出 mock 流式 plan，并记录 canonical/vendor 映射报告。
+  async plan(request: TTSStreamRequest): Promise<TTSStreamPlan>;
+  // plan: 入参为平台 operation request；输出 mock plan，并记录 canonical/vendor 映射报告。
+  async plan(request: TTSOperationRequest): Promise<TTSSyncPlan | TTSStreamPlan> {
+    if (request.operation !== "tts.sync" && request.operation !== "tts.stream") {
       throw new TTSError(
         `Mock adapter does not implement '${request.operation}' execution yet.`,
         "operation_not_supported",
@@ -223,19 +231,31 @@ export class MockTTSAdapter implements TTSAdapter {
       mappingReport.warnings.push("Text is empty after trimming; mock audio will still be generated.");
     }
 
-    return {
+    const basePlan = {
       planId: createPlanId(),
       providerId: this.providerId,
       adapterVersion: this.adapterVersion,
-      operation: "tts.sync",
       createdAt: new Date().toISOString(),
-      canonicalRequest: request,
       capabilitySnapshot,
       vendorRequest,
       mappingReport
     };
+
+    if (request.operation === "tts.sync") {
+      return {
+        ...basePlan,
+        operation: "tts.sync",
+        canonicalRequest: request
+      };
+    }
+    return {
+      ...basePlan,
+      operation: "tts.stream",
+      canonicalRequest: request
+    };
   }
 
+  // synthesizeSync: 入参为同步 plan；输出本地生成的 WAV 音频和 mock vendor response。
   async synthesizeSync(plan: TTSSyncPlan): Promise<TTSSyncProviderResult> {
     const sampleRateHz = numberFromVendor(plan.vendorRequest.sampleRateHz, 24000);
     const toneHz = numberFromVendor(plan.vendorRequest.toneHz, 440);
@@ -259,6 +279,50 @@ export class MockTTSAdapter implements TTSAdapter {
         toneHz,
         durationMs
       }
+    };
+  }
+
+  // synthesizeStream: 入参为流式 plan；输出统一 stream lifecycle 事件和一个 WAV 音频 chunk。
+  async *synthesizeStream(plan: TTSStreamPlan): AsyncIterable<TTSStreamEvent> {
+    const sampleRateHz = numberFromVendor(plan.vendorRequest.sampleRateHz, 24000);
+    const toneHz = numberFromVendor(plan.vendorRequest.toneHz, 440);
+    const durationMs = numberFromVendor(plan.vendorRequest.durationMs, 300);
+    const audio = createSineWaveWav({
+      sampleRateHz,
+      toneHz,
+      durationMs
+    });
+
+    yield {
+      type: "session.started",
+      sessionId: plan.planId,
+      planId: plan.planId,
+      sequence: 0
+    };
+    yield {
+      type: "metadata",
+      sequence: 1,
+      payload: {
+        providerRunId: createRunId(),
+        protocol: "websocket",
+        inputMode: "text_once",
+        format: "wav",
+        sampleRateHz,
+        toneHz,
+        durationMs
+      }
+    };
+    yield {
+      type: "audio.chunk",
+      sequence: 2,
+      data: audio,
+      format: "wav",
+      timestampMs: 0
+    };
+    yield {
+      type: "session.completed",
+      sequence: 3,
+      durationMs
     };
   }
 }

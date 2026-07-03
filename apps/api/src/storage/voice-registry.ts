@@ -21,7 +21,9 @@ export class InMemoryVoiceRegistry {
   // list: 入参为可选查询条件；功能是列出本地保存的音色记录。
   list(query: VoiceQuery = {}): VoiceRecord[] {
     return [...this.voices.values()].filter((voice) => {
-      return query.providerId === undefined || voice.providerId === query.providerId;
+      const matchesProvider = query.providerId === undefined || voice.providerId === query.providerId;
+      const matchesModel = query.modelId === undefined || voice.modelId === undefined || voice.modelId === query.modelId;
+      return matchesProvider && matchesModel;
     });
   }
 

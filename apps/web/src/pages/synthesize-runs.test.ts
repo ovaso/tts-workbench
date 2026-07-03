@@ -40,9 +40,27 @@ const cloneRun: ArchivedRunSummary = {
   }
 };
 
+const streamRun: ArchivedRunSummary = {
+  runId: "run_stream",
+  providerId: "cosyvoice",
+  operation: "tts.stream",
+  status: "succeeded",
+  createdAt: "2026-07-03T00:02:00.000Z",
+  audio: {
+    fileName: "audio.mp3",
+    format: "mp3",
+    sampleRateHz: 24000,
+    byteLength: 100
+  },
+  archive: {
+    runPath: "data/runs/run_stream",
+    files: []
+  }
+};
+
 describe("synthesize runs helpers", () => {
-  it("keeps only sync synthesis runs for the synthesize page", () => {
-    expect(syncSynthesisRuns([cloneRun, syncRun])).toEqual([syncRun]);
+  it("keeps synthesis runs for the synthesize page", () => {
+    expect(syncSynthesisRuns([cloneRun, streamRun, syncRun])).toEqual([streamRun, syncRun]);
   });
 
   it("formats audio metadata for run rows", () => {

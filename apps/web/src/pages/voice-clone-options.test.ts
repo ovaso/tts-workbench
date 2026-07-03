@@ -3,6 +3,7 @@ import type { TTSCapabilities } from "@tts-platform/core";
 import {
   persistentVoiceCloneCapability,
   referenceAudioSummary,
+  shouldUseStreamVoiceTest,
   voiceCloneSupportText
 } from "./voice-clone-options";
 import { modelById, vendorExtensionTemplateForOperation } from "./synthesize-options";
@@ -71,6 +72,11 @@ const supportedCapabilities: TTSCapabilities = {
 };
 
 describe("voice clone options", () => {
+  it("routes CosyVoice managed voice tests through stream synthesis", () => {
+    expect(shouldUseStreamVoiceTest("cosyvoice")).toBe(true);
+    expect(shouldUseStreamVoiceTest("minimax")).toBe(false);
+  });
+
   it("derives persistent voice clone status from capabilities", () => {
     expect(voiceCloneSupportText(undefined)).toBe("请选择厂商");
     expect(voiceCloneSupportText(supportedCapabilities)).toBe("支持持久音色复刻");

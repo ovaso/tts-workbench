@@ -1,17 +1,24 @@
 import {
   TTSError,
+  type TTSOutputFormat,
+  type TTSStreamEvent,
   type TTSSyncRequest,
   type TTSStreamRequest,
   type VoiceCloneRequest,
   type VoiceCreateRequest,
+  type VendorPayload,
   type VendorDirective
 } from "@tts-platform/core";
 import type { FastifyInstance } from "fastify";
 import type { TTSFacade } from "../facade/tts-facade";
+import type { FileRunArchive } from "../storage/run-archive";
+import type { StreamSessionRegistry } from "../stream/stream-session-registry";
 
 export async function registerSynthesizeRoutes(
   app: FastifyInstance,
-  facade: TTSFacade
+  facade: TTSFacade,
+  archive: FileRunArchive,
+  streamSessions: StreamSessionRegistry
 ): Promise<void> {
   app.post("/v1/tts/sync", async (request, reply) => {
     const syncRequest = parseSyncRequest(request.body);
@@ -21,9 +28,150 @@ export async function registerSynthesizeRoutes(
 
   app.post("/v1/tts/stream", async (request, reply) => {
     const streamRequest = parseStreamRequest(request.body);
-    const result = await facade.synthesizeStream(streamRequest);
-    return reply.status(201).send(result);
+    const prepared = await facade.prepareStream(streamRequest);
+    const result = streamSessions.save(prepared, `/v1/tts/stream/${prepared.session.sessionId}/ws`);
+    return reply.status(201).send(result.session);
   });
+
+  app.get<{ Params: { sessionId: string } }>(
+    "/v1/tts/stream/:sessionId/ws",
+    { websocket: true },
+    async (socket, request) => {
+      const sessionId = decodeURIComponent(request.params.sessionId);
+      const record = streamSessions.consume(sessionId);
+      const vendorEvents: VendorPayload[] = [];
+      const audioChunks: Uint8Array[] = [];
+      let audioFormat: TTSOutputFormat | undefined;
+      let closedByClient = false;
+      let runStatus: "succeeded" | "failed" = "succeeded";
+      let markClientReady: () => void = () => {};
+      const clientReady = new Promise<void>((resolve) => {
+        markClientReady = resolve;
+      });
+      let finalResponse: VendorPayload = {
+        status: "started",
+        sessionId
+      };
+
+      socket.on("message", (data: Buffer | ArrayBuffer | Buffer[]) => {
+        const event = parseDownstreamFrame(data);
+        if (event === undefined) {
+          return;
+        }
+        vendorEvents.push({
+          direction: "downstream",
+          event
+        });
+        if (event.type === "cancel") {
+          closedByClient = true;
+          socket.close(1000, "cancelled");
+          markClientReady();
+          return;
+        }
+        if (event.type === "client.ready") {
+          markClientReady();
+        }
+      });
+      socket.on("close", () => {
+        closedByClient = true;
+        markClientReady();
+      });
+
+      try {
+        await clientReady;
+        if (closedByClient) {
+          return;
+        }
+        for await (const event of record.adapter.synthesizeStream(record.plan)) {
+          vendorEvents.push(toArchiveStreamEvent(event));
+          if (event.type === "audio.chunk") {
+            audioChunks.push(event.data);
+            audioFormat = event.format;
+            if (isWebSocketOpen(socket.readyState)) {
+              socket.send(Buffer.from(event.data));
+            }
+            continue;
+          }
+
+          if (event.type === "session.completed") {
+            finalResponse = {
+              status: "succeeded",
+              event: toArchiveStreamEvent(event)
+            };
+          }
+          if (event.type === "error") {
+            runStatus = "failed";
+            finalResponse = {
+              status: "failed",
+              event: toArchiveStreamEvent(event)
+            };
+          }
+          if (isWebSocketOpen(socket.readyState)) {
+            socket.send(JSON.stringify(toDownstreamStreamEvent(event)));
+          }
+        }
+
+        await archive.writeStreamRun({
+          request: record.request,
+          plan: record.plan,
+          vendorEvents,
+          vendorResponse: finalResponse,
+          status: runStatus,
+          ...(audioChunks.length === 0 || audioFormat === undefined
+            ? {}
+            : {
+                audio: {
+                  data: concatBytes(audioChunks),
+                  format: audioFormat,
+                  sampleRateHz: sampleRateFromStreamPlan(record.plan.vendorRequest)
+                }
+              })
+        });
+        if (!closedByClient && isWebSocketOpen(socket.readyState)) {
+          socket.close(1000, "completed");
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Stream execution failed.";
+        finalResponse = {
+          status: "failed",
+          message
+        };
+        vendorEvents.push({
+          direction: "platform",
+          type: "error",
+          message
+        });
+        await archive.writeStreamRun({
+          request: record.request,
+          plan: record.plan,
+          vendorEvents,
+          vendorResponse: finalResponse,
+          status: "failed",
+          ...(audioChunks.length === 0 || audioFormat === undefined
+            ? {}
+            : {
+                audio: {
+                  data: concatBytes(audioChunks),
+                  format: audioFormat,
+                  sampleRateHz: sampleRateFromStreamPlan(record.plan.vendorRequest)
+                }
+              })
+        });
+        if (isWebSocketOpen(socket.readyState)) {
+          socket.send(
+            JSON.stringify({
+              type: "error",
+              sequence: vendorEvents.length,
+              message
+            })
+          );
+          socket.close(1011, "stream error");
+        }
+      } finally {
+        streamSessions.delete(sessionId);
+      }
+    }
+  );
 
   app.post(
     "/v1/voice-clones",
@@ -40,8 +188,12 @@ export async function registerSynthesizeRoutes(
   app.get("/v1/voices", async (request) => {
     const query = requireObject(request.query, "query");
     const providerId = typeof query.providerId === "string" ? query.providerId : undefined;
+    const modelId = typeof query.modelId === "string" ? query.modelId : undefined;
     return {
-      voices: facade.listVoices(providerId === undefined ? {} : { providerId })
+      voices: facade.listVoices({
+        ...(providerId === undefined ? {} : { providerId }),
+        ...(modelId === undefined ? {} : { modelId })
+      })
     };
   });
 
@@ -329,6 +481,74 @@ function parseVendorDirective(value: unknown): VendorDirective | undefined {
     }
   }
   return parsed;
+}
+
+// parseDownstreamFrame: 入参为下游 WebSocket 消息；输出可归档的平台控制事件。
+function parseDownstreamFrame(data: Buffer | ArrayBuffer | Buffer[]): VendorPayload | undefined {
+  if (Array.isArray(data)) {
+    return undefined;
+  }
+  const text = Buffer.isBuffer(data) ? data.toString("utf8") : Buffer.from(data).toString("utf8");
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as VendorPayload)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// toDownstreamStreamEvent: 入参为统一流式事件；输出下游 WebSocket JSON 事件。
+function toDownstreamStreamEvent(event: TTSStreamEvent): VendorPayload {
+  if (event.type === "audio.chunk") {
+    return {
+      type: event.type,
+      sequence: event.sequence,
+      byteLength: event.data.byteLength,
+      format: event.format,
+      ...(event.timestampMs === undefined ? {} : { timestampMs: event.timestampMs })
+    };
+  }
+  return event;
+}
+
+// toArchiveStreamEvent: 入参为统一流式事件；输出去除大块音频正文后的归档事件。
+function toArchiveStreamEvent(event: TTSStreamEvent): VendorPayload {
+  if (event.type === "audio.chunk") {
+    return {
+      type: event.type,
+      sequence: event.sequence,
+      byteLength: event.data.byteLength,
+      format: event.format,
+      ...(event.timestampMs === undefined ? {} : { timestampMs: event.timestampMs })
+    };
+  }
+  return event;
+}
+
+// concatBytes: 入参为多个 Uint8Array；输出按顺序拼接后的字节数组。
+function concatBytes(chunks: Uint8Array[]): Uint8Array {
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+}
+
+// sampleRateFromStreamPlan: 入参为 vendorRequest；输出流式归档音频的采样率。
+function sampleRateFromStreamPlan(vendorRequest: VendorPayload): number {
+  return typeof vendorRequest.sampleRateHz === "number" && Number.isFinite(vendorRequest.sampleRateHz)
+    ? vendorRequest.sampleRateHz
+    : 24000;
+}
+
+// isWebSocketOpen: 入参为 ws readyState；输出连接是否仍可发送数据。
+function isWebSocketOpen(readyState: number): boolean {
+  return readyState === 1;
 }
 
 function requireObject(value: unknown, label: string): Record<string, unknown> {
