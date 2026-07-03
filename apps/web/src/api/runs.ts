@@ -1,23 +1,23 @@
 import type {
   MappingReport,
-  TTSSyncPlan,
-  TTSSyncRequest,
-  TTSSyncResult,
+  ArchivedRunSummary,
+  TTSOperationRequest,
+  TTSPlan,
   VendorPayload
 } from "@tts-platform/core";
 import { requestJson } from "./client";
 
 export interface RunDetail {
-  result: TTSSyncResult;
-  request: TTSSyncRequest;
-  plan: TTSSyncPlan;
+  result: ArchivedRunSummary & VendorPayload;
+  request: TTSOperationRequest;
+  plan: TTSPlan;
   mappingReport: MappingReport;
   vendorRequest: VendorPayload;
   vendorResponse: VendorPayload;
 }
 
-export async function listRuns(): Promise<TTSSyncResult[]> {
-  const response = await requestJson<{ runs: TTSSyncResult[] }>("/v1/runs");
+export async function listRuns(): Promise<ArchivedRunSummary[]> {
+  const response = await requestJson<{ runs: ArchivedRunSummary[] }>("/v1/runs");
   return response.runs;
 }
 

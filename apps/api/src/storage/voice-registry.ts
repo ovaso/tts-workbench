@@ -13,12 +13,19 @@ export class InMemoryVoiceRegistry {
     this.load();
   }
 
+  // get: 入参为平台 voiceId；功能是从本地 voice registry 中读取单条音色记录。
+  get(voiceId: string): VoiceRecord | undefined {
+    return this.voices.get(voiceId);
+  }
+
+  // list: 入参为可选查询条件；功能是列出本地保存的音色记录。
   list(query: VoiceQuery = {}): VoiceRecord[] {
     return [...this.voices.values()].filter((voice) => {
       return query.providerId === undefined || voice.providerId === query.providerId;
     });
   }
 
+  // save: 入参为音色记录；功能是写入内存 registry 并持久化到本地文件。
   save(voice: VoiceRecord): VoiceRecord {
     this.voices.set(voice.voiceId, voice);
     this.persist();

@@ -26,5 +26,6 @@ describe("InMemoryVoiceRegistry", () => {
 
     expect(reloaded.list({ providerId: "minimax" })).toHaveLength(1);
     expect(reloaded.list({ providerId: "minimax" })[0]?.providerVoiceId).toBe("voice_1");
+    expect(reloaded.get("minimax:voice_1")?.providerVoiceId).toBe("voice_1");
   });
 });

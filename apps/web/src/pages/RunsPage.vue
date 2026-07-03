@@ -15,6 +15,7 @@
           <tr>
             <th>运行 ID</th>
             <th>厂商</th>
+            <th>类型</th>
             <th>创建时间</th>
             <th>音频</th>
             <th class="text-right">打开</th>
@@ -24,8 +25,9 @@
           <tr v-for="run in runs" :key="run.runId">
             <td>{{ run.runId }}</td>
             <td>{{ run.providerId }}</td>
+            <td>{{ operationTitle(run.operation) }}</td>
             <td>{{ formatLocalDateTime(run.createdAt) }}</td>
-            <td>{{ run.audio.format }} · {{ run.audio.sampleRateHz }} Hz</td>
+            <td>{{ audioTitle(run) }}</td>
             <td class="text-right">
               <v-btn
                 icon="mdi-open-in-new"
@@ -42,12 +44,12 @@
 </template>
 
 <script setup lang="ts">
-import type { TTSSyncResult } from "@tts-platform/core";
+import type { ArchivedRunSummary } from "@tts-platform/core";
 import { onMounted, ref } from "vue";
 import { listRuns } from "../api/runs";
 import { formatLocalDateTime } from "../utils/time";
 
-const runs = ref<TTSSyncResult[]>([]);
+const runs = ref<ArchivedRunSummary[]>([]);
 const loading = ref(false);
 const error = ref("");
 
@@ -64,4 +66,20 @@ async function load() {
 }
 
 onMounted(load);
+
+// operationTitle: 入参为 operation；输出运行列表中展示的中文类型。
+function operationTitle(operation: ArchivedRunSummary["operation"]): string {
+  if (operation === "tts.sync") {
+    return "同步合成";
+  }
+  if (operation === "voice.clone.create") {
+    return "音色克隆";
+  }
+  return operation;
+}
+
+// audioTitle: 入参为运行摘要；输出音频列展示内容，非音频类运行显示占位。
+function audioTitle(run: ArchivedRunSummary): string {
+  return run.audio === undefined ? "无音频文件" : `${run.audio.format} · ${run.audio.sampleRateHz} Hz`;
+}
 </script>

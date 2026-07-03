@@ -30,12 +30,13 @@ export class TTSFacade {
   }
 
   async synthesizeSync(request: TTSSyncRequest): Promise<TTSSyncResult> {
-    const adapter = this.registry.getOrThrow(request.providerId);
-    const plan = await adapter.plan(request);
+    const resolvedRequest = this.resolveVoiceSelection(request);
+    const adapter = this.registry.getOrThrow(resolvedRequest.providerId);
+    const plan = await adapter.plan(resolvedRequest);
 
     if (plan.operation !== "tts.sync" || adapter.synthesizeSync === undefined) {
       throw new TTSError(
-        `Provider '${request.providerId}' does not support tts.sync.`,
+        `Provider '${resolvedRequest.providerId}' does not support tts.sync.`,
         "operation_not_supported",
         400
       );
@@ -43,7 +44,7 @@ export class TTSFacade {
 
     const providerResult = await adapter.synthesizeSync(plan);
     return this.archive.writeRun({
-      request,
+      request: resolvedRequest,
       plan,
       providerResult
     });
@@ -94,5 +95,33 @@ export class TTSFacade {
 
   listVoices(query?: VoiceQuery): VoiceRecord[] {
     return this.voices.list(query);
+  }
+
+  // resolveVoiceSelection: 入参为同步合成请求；功能是把平台 voiceId 解析为厂商 providerVoiceId。
+  private resolveVoiceSelection(request: TTSSyncRequest): TTSSyncRequest {
+    const localVoiceId = request.voice.voiceId;
+    if (localVoiceId === undefined) {
+      return request;
+    }
+
+    const voice = this.voices.get(localVoiceId);
+    if (voice === undefined) {
+      return request;
+    }
+    if (voice.providerId !== request.providerId) {
+      throw new TTSError(
+        `Voice '${localVoiceId}' belongs to provider '${voice.providerId}', not '${request.providerId}'.`,
+        "invalid_request",
+        400
+      );
+    }
+
+    return {
+      ...request,
+      voice: {
+        ...request.voice,
+        providerVoiceId: voice.providerVoiceId
+      }
+    };
   }
 }

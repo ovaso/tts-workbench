@@ -4,6 +4,7 @@ import type {
   TTSOperation,
   TTSOutputFormat,
   TTSVendorModel,
+  VoiceRecord,
   VendorPayload
 } from "@tts-platform/core";
 
@@ -84,6 +85,14 @@ export function defaultLanguageForModel(model: TTSVendorModel | undefined): stri
 export function defaultVoicePlaceholderForModel(model: TTSVendorModel | undefined): string {
   const voiceId = model?.defaultConfiguration?.voice?.providerVoiceId;
   return voiceId === undefined ? "留空使用厂商默认音色" : `默认：${voiceId}`;
+}
+
+// voiceOptions: 入参为本地 voice registry 音色列表；输出合成页可选的音色选项。
+export function voiceOptions(voices: VoiceRecord[]): SelectOption<string>[] {
+  return voices.map((voice) => ({
+    title: `${voice.displayName} (${voice.providerVoiceId})`,
+    value: voice.voiceId
+  }));
 }
 
 // vendorExtensionTemplateForOperation: 入参为厂商能力、operation 和模型；输出该 operation 的厂商参数完整模板。

@@ -11,7 +11,8 @@ import {
   modelById,
   modelOptions,
   sampleRateOptionsForModel,
-  vendorExtensionTemplateForOperation
+  vendorExtensionTemplateForOperation,
+  voiceOptions
 } from "./synthesize-options";
 
 const capabilities: TTSCapabilities = {
@@ -119,5 +120,26 @@ describe("synthesize options", () => {
       pronunciation_dict: {},
       timbre_weights: []
     });
+  });
+
+  it("builds cloned voice options from voice registry records", () => {
+    expect(
+      voiceOptions([
+        {
+          voiceId: "demo:voice_1",
+          providerId: "demo",
+          providerVoiceId: "voice_1",
+          displayName: "Voice One",
+          source: "cloned",
+          createdAt: "2026-07-03T00:00:00.000Z",
+          sourceOperation: "voice.clone.create"
+        }
+      ])
+    ).toEqual([
+      {
+        title: "Voice One (voice_1)",
+        value: "demo:voice_1"
+      }
+    ]);
   });
 });

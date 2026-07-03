@@ -123,7 +123,10 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
         : defaultOutput.sampleRateHz ?? 32000;
     const actualBitrate = requestedBitrate ?? defaultOutput.bitrate ?? 128000;
     const actualChannels = requestedChannels ?? defaultOutput.channels ?? 1;
-    const requestedVoice = request.voice.providerVoiceId ?? request.voice.voiceId;
+    const requestedVoice = normalizeSynthesisVoiceId(
+      request.voice.providerVoiceId ?? request.voice.voiceId,
+      this.providerId
+    );
     const voiceId = requestedVoice ?? defaultVoice.providerVoiceId;
     if (voiceId === undefined) {
       throw new TTSError(
@@ -477,23 +480,28 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
     const uploadPlan = objectAt(plan.vendorRequest, "upload");
     const cloneRequest = { ...objectAt(plan.vendorRequest, "clone") };
     const referenceAudio = objectAt(uploadPlan, "referenceAudio");
-    let fileId = typeof cloneRequest.file_id === "string" ? cloneRequest.file_id : "";
+    let referenceAudioId = vendorIdToString(cloneRequest.file_id) ?? "";
+    cloneRequest.file_id = vendorIdForRequest(cloneRequest.file_id);
     const workflow: VendorPayload[] = [];
 
-    if (fileId.length === 0 || fileId === "__uploaded_reference_audio_file_id__") {
+    if (referenceAudioId.length === 0 || referenceAudioId === "__uploaded_reference_audio_file_id__") {
       const uploadResponse = await this.uploadReferenceAudio(referenceAudio);
       workflow.push({
         step: "upload_reference_audio",
         response: uploadResponse
       });
+      assertMiniMaxBaseResponse("MiniMax reference audio upload returned an error.", uploadResponse, {
+        workflow
+      });
       const file = objectAt(uploadResponse, "file");
-      if (typeof file.file_id !== "string" || file.file_id.length === 0) {
+      const uploadedFileId = vendorIdToString(file.file_id);
+      if (uploadedFileId === undefined) {
         throw new TTSError("MiniMax upload response did not include file.file_id.", "vendor_execution_failed", 502, {
           vendorResponse: toJsonValue(uploadResponse)
         });
       }
-      fileId = file.file_id;
-      cloneRequest.file_id = fileId;
+      referenceAudioId = uploadedFileId;
+      cloneRequest.file_id = vendorIdForRequest(file.file_id);
     }
 
     const cloneResponse = await this.postJson("/v1/voice_clone", cloneRequest);
@@ -501,6 +509,10 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
       step: "voice_clone",
       request: cloneRequest,
       response: cloneResponse
+    });
+    assertMiniMaxBaseResponse("MiniMax voice clone returned an error.", cloneResponse, {
+      workflow,
+      cloneResponse
     });
 
     const providerVoiceId = providerVoiceIdFromCloneResponse(cloneResponse, String(cloneRequest.voice_id));
@@ -513,7 +525,7 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
       ...(plan.canonicalRequest.language === undefined ? {} : { language: plan.canonicalRequest.language }),
       createdAt: new Date().toISOString(),
       sourceOperation: "voice.clone.create" as const,
-      clone: cloneMetadata(fileId, plan.canonicalRequest.consent?.usageScope),
+      clone: cloneMetadata(referenceAudioId, plan.canonicalRequest.consent?.usageScope),
       vendorMetadata: {
         workflow
       }
@@ -540,9 +552,10 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
       });
     }
     const bytes = await audioResponse.arrayBuffer();
+    const format = typeof referenceAudio.format === "string" ? referenceAudio.format : "mp3";
     const form = new FormData();
     form.set("purpose", "voice_clone");
-    form.set("file", new Blob([bytes]), "voice-clone-audio");
+    form.set("file", new Blob([bytes], { type: mimeTypeForReferenceAudio(format) }), `voice-clone-audio.${format}`);
     const response = await this.fetchImpl(`${this.baseUrl}/v1/files/upload`, {
       method: "POST",
       headers: {
@@ -715,25 +728,82 @@ function defaultModelId(models: TTSVendorModel[], operation: TTSOperation): stri
 
 // normalizeVoiceId: 入参为用户可读音色名称；输出适合 MiniMax voice_id 的稳定标识。
 function normalizeVoiceId(displayName: string): string {
-  return displayName.trim().replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "_");
+  const normalized = displayName
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .replace(/^[^a-zA-Z]+/, "")
+    .replace(/[-_]+$/, "");
+  const withPrefix = /^[a-zA-Z]/.test(normalized) ? normalized : `voice_${normalized}`;
+  const minLength = withPrefix.length >= 8 ? withPrefix : `${withPrefix}_clone01`;
+  return minLength.slice(0, 256).replace(/[-_]+$/, "1");
+}
+
+// normalizeSynthesisVoiceId: 入参为用户请求中的音色 id 和 providerId；输出 MiniMax 可接收的厂商音色 id。
+function normalizeSynthesisVoiceId(voiceId: string | undefined, providerId: string): string | undefined {
+  if (voiceId === undefined) {
+    return undefined;
+  }
+  const localPrefix = `${providerId}:`;
+  return voiceId.startsWith(localPrefix) ? voiceId.slice(localPrefix.length) : voiceId;
 }
 
 // providerVoiceIdFromCloneResponse: 入参为厂商响应和兜底 voice id；输出 MiniMax provider voice id。
 function providerVoiceIdFromCloneResponse(response: VendorPayload, fallback: string): string {
   for (const key of ["voice_id", "voiceId"]) {
-    const value = response[key];
-    if (typeof value === "string" && value.length > 0) {
+    const value = vendorIdToString(response[key]);
+    if (value !== undefined) {
       return value;
     }
   }
   const data = objectAt(response, "data");
   for (const key of ["voice_id", "voiceId"]) {
-    const value = data[key];
-    if (typeof value === "string" && value.length > 0) {
+    const value = vendorIdToString(data[key]);
+    if (value !== undefined) {
       return value;
     }
   }
   return fallback;
+}
+
+// vendorIdToString: 入参为厂商返回的 id；输出适合 archive/registry 的字符串 id。
+function vendorIdToString(value: unknown): string | undefined {
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return undefined;
+}
+
+// vendorIdForRequest: 入参为厂商 id；输出符合 MiniMax JSON schema 的请求 id，数字字符串会还原为 integer。
+function vendorIdForRequest(value: unknown): string | number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && /^[0-9]+$/.test(value)) {
+    return Number(value);
+  }
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+  return undefined;
+}
+
+// assertMiniMaxBaseResponse: 入参为错误消息、厂商响应和细节；MiniMax 业务状态码非 0 时抛出执行错误。
+function assertMiniMaxBaseResponse(
+  message: string,
+  response: VendorPayload,
+  details: VendorPayload = {}
+): void {
+  const baseResp = objectAt(response, "base_resp");
+  if (typeof baseResp.status_code === "number" && baseResp.status_code !== 0) {
+    throw new TTSError(message, "vendor_execution_failed", 502, {
+      vendorResponse: toJsonValue(response),
+      ...details
+    });
+  }
 }
 
 // cloneMetadata: 入参为参考音频 id 和可选授权范围；输出 VoiceRecord clone 元数据。
@@ -743,6 +813,17 @@ function cloneMetadata(fileId: string, consentScope: string | undefined) {
     createdAt: new Date().toISOString(),
     ...(consentScope === undefined ? {} : { consentScope })
   };
+}
+
+// mimeTypeForReferenceAudio: 入参为参考音频格式；输出上传到 MiniMax files API 时使用的 MIME。
+function mimeTypeForReferenceAudio(format: string): string {
+  if (format === "wav") {
+    return "audio/wav";
+  }
+  if (format === "m4a") {
+    return "audio/mp4";
+  }
+  return "audio/mpeg";
 }
 
 // objectAt: 入参为 vendor payload 和 key；输出该 key 下的对象值，不是对象时返回空对象。

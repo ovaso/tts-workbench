@@ -149,6 +149,24 @@ describe("MiniMaxTTSAdapter", () => {
     expect(plan.mappingReport.appliedCanonicalFields.map((field) => field.field)).not.toContain("voice");
   });
 
+  it("normalizes a local MiniMax voice id before sending the vendor request", async () => {
+    const adapter = new MiniMaxTTSAdapter();
+    const plan = await adapter.plan({
+      operation: "tts.sync",
+      providerId: "minimax",
+      text: "local voice",
+      voice: {
+        providerVoiceId: "minimax:cloned_voice"
+      }
+    });
+
+    expect(plan.vendorRequest).toMatchObject({
+      voice_setting: {
+        voice_id: "cloned_voice"
+      }
+    });
+  });
+
   it("exposes only user-editable MiniMax voice clone extras through the vendor extension schema", () => {
     const schema = minimaxExtensionSchema("voice.clone.create").jsonSchema;
 
@@ -303,6 +321,143 @@ describe("MiniMaxTTSAdapter", () => {
     expect(fetchCalls).toEqual(["https://api.minimaxi.com/v1/voice_clone"]);
     expect(result.voice.providerVoiceId).toBe("cloned_voice");
     expect(result.voice.clone?.referenceAudioIds).toEqual(["file_existing"]);
+  });
+
+  it("uploads reference audio before voice clone when file id is missing", async () => {
+    const fetchCalls: Array<{ url: string; bodyType?: string; purpose?: string; jsonBody?: unknown }> = [];
+    const adapter = new MiniMaxTTSAdapter({
+      apiKey: "test-key",
+      fetch: async (url, init) => {
+        const body = init?.body;
+        const call: { url: string; bodyType?: string; purpose?: string; jsonBody?: unknown } = {
+          url: String(url),
+          bodyType: body instanceof FormData ? "form-data" : typeof body
+        };
+        if (body instanceof FormData) {
+          call.purpose = String(body.get("purpose"));
+        }
+        if (typeof body === "string") {
+          call.jsonBody = JSON.parse(body) as unknown;
+        }
+        fetchCalls.push(call);
+
+        if (String(url).startsWith("data:")) {
+          return new Response(new Uint8Array([1, 2, 3]), {
+            status: 200,
+            headers: {
+              "Content-Type": "audio/mpeg"
+            }
+          });
+        }
+
+        if (String(url).endsWith("/v1/files/upload")) {
+          return new Response(
+            JSON.stringify({
+              file: {
+                file_id: 415715405590927
+              }
+            }),
+            {
+              status: 200,
+              headers: {
+                "Content-Type": "application/json"
+              }
+            }
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            data: {
+              voice_id: "cloned_from_upload"
+            },
+            base_resp: {
+              status_code: 0,
+              status_msg: "success"
+            }
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json"
+            }
+          }
+        );
+      }
+    });
+
+    const plan = await adapter.plan({
+      operation: "voice.clone.create",
+      providerId: "minimax",
+      displayName: "Uploaded Voice",
+      referenceAudio: [
+        {
+          uri: "data:audio/mpeg;base64,AQID",
+          format: "mp3"
+        }
+      ]
+    });
+    if (plan.operation !== "voice.clone.create") {
+      throw new Error("Expected voice clone plan.");
+    }
+
+    const result = await adapter.createVoiceClone(plan);
+
+    expect(fetchCalls.map((call) => call.url)).toEqual([
+      "data:audio/mpeg;base64,AQID",
+      "https://api.minimaxi.com/v1/files/upload",
+      "https://api.minimaxi.com/v1/voice_clone"
+    ]);
+    expect(fetchCalls[1]).toMatchObject({
+      bodyType: "form-data",
+      purpose: "voice_clone"
+    });
+    expect(fetchCalls[2]?.jsonBody).toMatchObject({
+      file_id: 415715405590927,
+      voice_id: "Uploaded_Voice"
+    });
+    expect(result.voice.providerVoiceId).toBe("cloned_from_upload");
+    expect(result.voice.clone?.referenceAudioIds).toEqual(["415715405590927"]);
+  });
+
+  it("treats non-zero MiniMax voice clone base_resp as a failed clone", async () => {
+    const adapter = new MiniMaxTTSAdapter({
+      apiKey: "test-key",
+      fetch: async () =>
+        new Response(
+          JSON.stringify({
+            input_sensitive: false,
+            demo_audio: "",
+            base_resp: {
+              status_code: 2013,
+              status_msg: "invalid params"
+            }
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json"
+            }
+          }
+        )
+    });
+
+    const plan = await adapter.plan({
+      operation: "voice.clone.create",
+      providerId: "minimax",
+      displayName: "Valid Voice",
+      referenceAudio: [
+        {
+          uri: "",
+          fileId: "415715405590927"
+        }
+      ]
+    });
+    if (plan.operation !== "voice.clone.create") {
+      throw new Error("Expected voice clone plan.");
+    }
+
+    await expect(adapter.createVoiceClone(plan)).rejects.toThrow("MiniMax voice clone returned an error.");
   });
 
   it("plans stream synthesis and emits stream lifecycle events", async () => {

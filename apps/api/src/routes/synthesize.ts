@@ -24,11 +24,17 @@ export async function registerSynthesizeRoutes(
     return reply.status(201).send(result);
   });
 
-  app.post("/v1/voice-clones", async (request, reply) => {
-    const cloneRequest = parseVoiceCloneRequest(request.body);
-    const result = await facade.createVoiceClone(cloneRequest);
-    return reply.status(201).send(result);
-  });
+  app.post(
+    "/v1/voice-clones",
+    {
+      bodyLimit: 32 * 1024 * 1024
+    },
+    async (request, reply) => {
+      const cloneRequest = parseVoiceCloneRequest(request.body);
+      const result = await facade.createVoiceClone(cloneRequest);
+      return reply.status(201).send(result);
+    }
+  );
 
   app.get("/v1/voices", async (request) => {
     const query = requireObject(request.query, "query");

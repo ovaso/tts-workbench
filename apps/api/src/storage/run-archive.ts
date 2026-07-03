@@ -3,7 +3,10 @@ import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   TTSError,
+  type ArchivedRunSummary,
+  type AudioArtifact,
   type MappingReport,
+  type TTSOutputFormat,
   type TTSPlan,
   type TTSSyncPlan,
   type TTSSyncProviderResult,
@@ -105,6 +108,11 @@ export class FileRunArchive {
 
     const result = {
       ...input.providerResult,
+      runId,
+      providerId: input.request.providerId,
+      operation: "voice.clone.create" as const,
+      status: "succeeded" as const,
+      createdAt: new Date().toISOString(),
       archive: {
         runPath: `data/runs/${runId}`,
         files: [...ARCHIVE_FILES]
@@ -121,7 +129,7 @@ export class FileRunArchive {
     return input.providerResult;
   }
 
-  async listRuns(): Promise<TTSSyncResult[]> {
+  async listRuns(): Promise<ArchivedRunSummary[]> {
     await mkdir(runsRoot(this.dataRoot), { recursive: true });
     const entries = await readdir(runsRoot(this.dataRoot), { withFileTypes: true });
     const results = await Promise.all(
@@ -129,9 +137,7 @@ export class FileRunArchive {
         .filter((entry) => entry.isDirectory())
         .map(async (entry) => {
           try {
-            return await readJsonFile<TTSSyncResult>(
-              path.join(runsRoot(this.dataRoot), entry.name, "result.json")
-            );
+            return await readRunSummary(runsRoot(this.dataRoot), entry.name);
           } catch {
             return undefined;
           }
@@ -139,7 +145,7 @@ export class FileRunArchive {
     );
 
     return results
-      .filter((result): result is TTSSyncResult => result !== undefined)
+      .filter((result): result is ArchivedRunSummary => result !== undefined)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
@@ -176,6 +182,77 @@ export class FileRunArchive {
       filePath
     };
   }
+}
+
+// readRunSummary: 入参为 runs 根目录和 runId；功能是兼容读取同步合成与音色克隆的列表摘要。
+async function readRunSummary(root: string, runId: string): Promise<ArchivedRunSummary> {
+  const directory = path.join(root, runId);
+  const result = await readJsonFile<Record<string, unknown>>(path.join(directory, "result.json"));
+  const plan = await readJsonFile<TTSPlan>(path.join(directory, "plan.json"));
+
+  const audio = isAudioArtifact(result.audio) ? result.audio : undefined;
+  const summary: ArchivedRunSummary = {
+    runId: stringValue(result.runId) ?? runId,
+    providerId: stringValue(result.providerId) ?? plan.providerId,
+    operation: plan.operation,
+    status: result.status === "failed" || result.status === "planned" ? result.status : "succeeded",
+    createdAt: stringValue(result.createdAt) ?? plan.createdAt,
+    archive: archiveSummary(result.archive, runId, audio)
+  };
+  if (audio !== undefined) {
+    summary.audio = audio;
+  }
+  return summary;
+}
+
+// archiveSummary: 入参为 result 中的 archive、runId 和音频信息；输出运行列表所需的归档摘要。
+function archiveSummary(archive: unknown, runId: string, audio: AudioArtifact | undefined): ArchivedRunSummary["archive"] {
+  if (archive !== null && typeof archive === "object" && !Array.isArray(archive)) {
+    const record = archive as Record<string, unknown>;
+    const files = Array.isArray(record.files)
+      ? record.files.filter((file): file is string => typeof file === "string")
+      : [...ARCHIVE_FILES];
+    return {
+      runPath: stringValue(record.runPath) ?? `data/runs/${runId}`,
+      files
+    };
+  }
+
+  return {
+    runPath: `data/runs/${runId}`,
+    files: audio === undefined ? [...ARCHIVE_FILES] : [...ARCHIVE_FILES, audio.fileName]
+  };
+}
+
+// isAudioArtifact: 入参为未知 JSON 值；输出是否可作为同步合成音频摘要使用。
+function isAudioArtifact(value: unknown): value is AudioArtifact {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const audio = value as Record<string, unknown>;
+  return (
+    typeof audio.fileName === "string" &&
+    isOutputFormat(audio.format) &&
+    typeof audio.sampleRateHz === "number" &&
+    typeof audio.byteLength === "number"
+  );
+}
+
+// isOutputFormat: 入参为未知值；输出是否为平台支持的音频格式。
+function isOutputFormat(value: unknown): value is TTSOutputFormat {
+  return (
+    value === "wav" ||
+    value === "mp3" ||
+    value === "ogg" ||
+    value === "pcm" ||
+    value === "flac" ||
+    value === "opus"
+  );
+}
+
+// stringValue: 入参为未知值；输出非空字符串或 undefined。
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function assertSafeRunId(runId: string): void {

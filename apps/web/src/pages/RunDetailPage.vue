@@ -14,7 +14,7 @@
         创建时间 {{ formatLocalDateTime(detail.result.createdAt) }}
       </div>
       <AudioPlayer
-        v-if="detail.result.audio.url"
+        v-if="detail.result.audio?.url"
         class="mb-4"
         :format="detail.result.audio.format"
         :src="detail.result.audio.url"

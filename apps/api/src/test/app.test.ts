@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -143,5 +143,60 @@ describe("api app", () => {
     expect(response.json()).toEqual({
       voices: []
     });
+  });
+
+  it("resolves local voice ids before planning synthesis", async () => {
+    const dataRoot = await mkdtemp(path.join(os.tmpdir(), "tts-api-voices-"));
+    await mkdir(path.join(dataRoot, "voices"), { recursive: true });
+    await writeFile(
+      path.join(dataRoot, "voices", "voices.json"),
+      `${JSON.stringify(
+        {
+          voices: [
+            {
+              voiceId: "mock:cloned_voice",
+              providerId: "mock",
+              providerVoiceId: "mock-cloned-provider-voice",
+              displayName: "Mock Clone",
+              source: "cloned",
+              createdAt: "2026-07-03T00:00:00.000Z",
+              sourceOperation: "voice.clone.create",
+              clone: {
+                createdAt: "2026-07-03T00:00:00.000Z"
+              }
+            }
+          ]
+        },
+        null,
+        2
+      )}\n`
+    );
+    const voiceApp = await buildApp({
+      dataRoot,
+      loadEnv: false
+    });
+
+    try {
+      const response = await voiceApp.inject({
+        method: "POST",
+        url: "/v1/tts/sync",
+        payload: {
+          providerId: "mock",
+          text: "hello cloned voice",
+          voice: {
+            voiceId: "mock:cloned_voice"
+          }
+        }
+      });
+
+      expect(response.statusCode).toBe(201);
+      const detail = await voiceApp.inject({
+        method: "GET",
+        url: `/v1/runs/${response.json().runId}`
+      });
+      expect(detail.json().vendorRequest.voice).toBe("mock-cloned-provider-voice");
+    } finally {
+      await voiceApp.close();
+    }
   });
 });

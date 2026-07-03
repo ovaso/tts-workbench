@@ -34,6 +34,19 @@ export interface TTSSyncResult {
   };
 }
 
+export interface ArchivedRunSummary {
+  runId: string;
+  providerId: string;
+  operation: TTSOperation;
+  status: RunStatus;
+  createdAt: string;
+  audio?: AudioArtifact;
+  archive: {
+    runPath: string;
+    files: string[];
+  };
+}
+
 export interface TTSStreamSession {
   sessionId: string;
   providerId: string;

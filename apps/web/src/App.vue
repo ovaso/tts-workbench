@@ -47,11 +47,6 @@ const navItems = [
     title: "厂商",
     icon: "mdi-server",
     to: "/providers"
-  },
-  {
-    title: "运行记录",
-    icon: "mdi-history",
-    to: "/runs"
   }
 ];
 </script>
