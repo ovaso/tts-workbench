@@ -145,6 +145,127 @@ describe("api app", () => {
     });
   });
 
+  it("registers an external provider voice in the local voice registry", async () => {
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/v1/voices",
+      payload: {
+        providerId: "minimax",
+        providerVoiceId: "external_voice_1",
+        displayName: "External Voice",
+        source: "external",
+        modelId: "speech-2.8-hd",
+        language: "zh-CN"
+      }
+    });
+
+    expect(createResponse.statusCode).toBe(201);
+    expect(createResponse.json().voice).toMatchObject({
+      voiceId: "minimax:external_voice_1",
+      providerId: "minimax",
+      providerVoiceId: "external_voice_1",
+      displayName: "External Voice",
+      source: "external",
+      modelId: "speech-2.8-hd",
+      language: "zh-CN"
+    });
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: "/v1/voices?providerId=minimax"
+    });
+
+    expect(listResponse.json().voices).toHaveLength(1);
+    expect(listResponse.json().voices[0].voiceId).toBe("minimax:external_voice_1");
+  });
+
+  it("deletes a managed voice from the local voice registry", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/v1/voices",
+      payload: {
+        providerId: "minimax",
+        providerVoiceId: "external_voice_2",
+        displayName: "External Voice 2",
+        source: "external"
+      }
+    });
+
+    const deleteResponse = await app.inject({
+      method: "DELETE",
+      url: `/v1/voices/${encodeURIComponent("minimax:external_voice_2")}`
+    });
+
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(deleteResponse.json()).toMatchObject({
+      voiceId: "minimax:external_voice_2",
+      providerId: "minimax",
+      providerVoiceId: "external_voice_2"
+    });
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: "/v1/voices?providerId=minimax"
+    });
+
+    expect(listResponse.json().voices).toEqual([]);
+  });
+
+  it("allows browser CORS preflight for managed voice deletion", async () => {
+    const response = await app.inject({
+      method: "OPTIONS",
+      url: `/v1/voices/${encodeURIComponent("minimax:external_voice_2")}`,
+      headers: {
+        origin: "http://localhost:5173",
+        "access-control-request-method": "DELETE"
+      }
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(response.headers["access-control-allow-methods"]).toContain("DELETE");
+  });
+
+  it("creates bench configs with digest based deduplication", async () => {
+    const payload = {
+      displayName: "MiniMax baseline",
+      providerId: "minimax",
+      modelId: "speech-02",
+      voice: {
+        providerVoiceId: "voice_a"
+      },
+      output: {
+        format: "mp3",
+        sampleRateHz: 32000
+      },
+      controls: {
+        speed: 1
+      }
+    };
+
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/v1/bench-configs",
+      payload
+    });
+    const duplicateResponse = await app.inject({
+      method: "POST",
+      url: "/v1/bench-configs",
+      payload: {
+        ...payload,
+        displayName: "Duplicate label"
+      }
+    });
+    const listResponse = await app.inject({
+      method: "GET",
+      url: "/v1/bench-configs"
+    });
+
+    expect(createResponse.statusCode).toBe(201);
+    expect(duplicateResponse.statusCode).toBe(201);
+    expect(duplicateResponse.json().config.configId).toBe(createResponse.json().config.configId);
+    expect(listResponse.json().configs).toHaveLength(1);
+  });
+
   it("resolves local voice ids before planning synthesis", async () => {
     const dataRoot = await mkdtemp(path.join(os.tmpdir(), "tts-api-voices-"));
     await mkdir(path.join(dataRoot, "voices"), { recursive: true });

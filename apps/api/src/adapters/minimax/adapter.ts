@@ -522,6 +522,7 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
       providerVoiceId,
       displayName: plan.canonicalRequest.displayName,
       source: "cloned" as const,
+      ...(plan.canonicalRequest.model === undefined ? {} : { modelId: plan.canonicalRequest.model }),
       ...(plan.canonicalRequest.language === undefined ? {} : { language: plan.canonicalRequest.language }),
       createdAt: new Date().toISOString(),
       sourceOperation: "voice.clone.create" as const,

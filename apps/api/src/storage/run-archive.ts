@@ -191,6 +191,7 @@ async function readRunSummary(root: string, runId: string): Promise<ArchivedRunS
   const plan = await readJsonFile<TTSPlan>(path.join(directory, "plan.json"));
 
   const audio = isAudioArtifact(result.audio) ? result.audio : undefined;
+  const errorReason = runErrorReason(result);
   const summary: ArchivedRunSummary = {
     runId: stringValue(result.runId) ?? runId,
     providerId: stringValue(result.providerId) ?? plan.providerId,
@@ -202,7 +203,30 @@ async function readRunSummary(root: string, runId: string): Promise<ArchivedRunS
   if (audio !== undefined) {
     summary.audio = audio;
   }
+  if (errorReason !== undefined) {
+    summary.errorReason = errorReason;
+  }
   return summary;
+}
+
+// runErrorReason: 入参为 result.json 内容；输出运行失败时可在列表 tooltip 展示的错误原因。
+function runErrorReason(result: Record<string, unknown>): string | undefined {
+  const directReason = stringValue(result.errorReason);
+  if (directReason !== undefined) {
+    return directReason;
+  }
+
+  const directMessage = stringValue(result.message);
+  if (directMessage !== undefined) {
+    return directMessage;
+  }
+
+  if (result.error !== null && typeof result.error === "object" && !Array.isArray(result.error)) {
+    const error = result.error as Record<string, unknown>;
+    return stringValue(error.message);
+  }
+
+  return undefined;
 }
 
 // archiveSummary: 入参为 result 中的 archive、runId 和音频信息；输出运行列表所需的归档摘要。

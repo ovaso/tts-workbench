@@ -28,4 +28,24 @@ describe("InMemoryVoiceRegistry", () => {
     expect(reloaded.list({ providerId: "minimax" })[0]?.providerVoiceId).toBe("voice_1");
     expect(reloaded.get("minimax:voice_1")?.providerVoiceId).toBe("voice_1");
   });
+
+  it("deletes voices from the persisted local registry", async () => {
+    const dataRoot = await mkdtemp(path.join(os.tmpdir(), "tts-voices-delete-"));
+    const registry = new InMemoryVoiceRegistry(dataRoot);
+
+    registry.save({
+      voiceId: "minimax:external_voice",
+      providerId: "minimax",
+      providerVoiceId: "external_voice",
+      displayName: "External Voice",
+      source: "external",
+      createdAt: "2026-07-03T00:00:00.000Z"
+    });
+
+    expect(registry.delete("minimax:external_voice")?.providerVoiceId).toBe("external_voice");
+
+    const reloaded = new InMemoryVoiceRegistry(dataRoot);
+    expect(reloaded.get("minimax:external_voice")).toBeUndefined();
+    expect(reloaded.list({ providerId: "minimax" })).toEqual([]);
+  });
 });

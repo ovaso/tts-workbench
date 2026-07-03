@@ -203,4 +203,72 @@ describe("FileRunArchive", () => {
     });
     expect(runs[0]?.audio).toBeUndefined();
   });
+
+  it("lists failed run error reason for status tooltips", async () => {
+    const dataRoot = await mkdtemp(path.join(os.tmpdir(), "tts-archive-failed-"));
+    const runDirectory = path.join(dataRoot, "runs", "run_failed");
+    const archive = new FileRunArchive(dataRoot);
+    await mkdir(runDirectory, { recursive: true });
+    const plan = {
+      planId: "plan_failed",
+      providerId: "minimax",
+      adapterVersion: "0.1.0",
+      operation: "tts.sync",
+      createdAt: "2026-07-03T02:00:00.000Z",
+      capabilitySnapshot: {
+        providerId: "minimax",
+        providerName: "MiniMax",
+        adapterVersion: "0.1.0",
+        vendorFeatures: {},
+        vendorModels: [],
+        operations: {}
+      },
+      vendorRequest: {},
+      mappingReport: {
+        providerId: "minimax",
+        operation: "tts.sync",
+        directiveMode: "prefer_vendor",
+        appliedCanonicalFields: [],
+        appliedVendorExtensions: [],
+        ignoredFields: [],
+        approximations: [],
+        warnings: []
+      },
+      canonicalRequest: {
+        operation: "tts.sync",
+        providerId: "minimax",
+        text: "failed"
+      }
+    };
+    await writeFile(path.join(runDirectory, "plan.json"), `${JSON.stringify(plan)}\n`);
+    await writeFile(
+      path.join(runDirectory, "result.json"),
+      `${JSON.stringify({
+        runId: "run_failed",
+        providerId: "minimax",
+        operation: "tts.sync",
+        status: "failed",
+        createdAt: "2026-07-03T02:00:01.000Z",
+        error: {
+          message: "Vendor rejected the request."
+        },
+        archive: {
+          runPath: "data/runs/run_failed",
+          files: []
+        }
+      })}\n`
+    );
+    await writeFile(path.join(runDirectory, "request.json"), "{}\n");
+    await writeFile(path.join(runDirectory, "mapping-report.json"), "{}\n");
+    await writeFile(path.join(runDirectory, "vendor-request.json"), "{}\n");
+    await writeFile(path.join(runDirectory, "vendor-response.json"), "{}\n");
+
+    const runs = await archive.listRuns();
+
+    expect(runs[0]).toMatchObject({
+      runId: "run_failed",
+      status: "failed",
+      errorReason: "Vendor rejected the request."
+    });
+  });
 });

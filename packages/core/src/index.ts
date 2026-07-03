@@ -1,4 +1,5 @@
 export * from "./adapter";
+export * from "./bench";
 export * from "./capabilities";
 export * from "./errors";
 export * from "./json";

@@ -18,6 +18,10 @@ export function voicesRoot(dataRoot: string): string {
   return path.join(dataRoot, "voices");
 }
 
+export function benchConfigsRoot(dataRoot: string): string {
+  return path.join(dataRoot, "bench-configs");
+}
+
 // findWorkspaceRoot: 入参为起始目录；向上查找 pnpm-workspace.yaml，找不到时回退到当前工作目录。
 function findWorkspaceRoot(startDirectory: string): string {
   let current = path.resolve(startDirectory);

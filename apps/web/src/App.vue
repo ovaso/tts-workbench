@@ -1,7 +1,7 @@
 <template>
   <v-app>
     <v-app-bar color="surface" density="comfortable" elevation="0" border>
-      <v-app-bar-nav-icon class="d-sm-none" icon="mdi-menu" @click="drawer = !drawer" />
+      <v-app-bar-nav-icon class="d-lg-none" icon="mdi-menu" @click="drawer = !drawer" />
       <v-app-bar-title>TTS Workbench</v-app-bar-title>
     </v-app-bar>
 
@@ -18,35 +18,37 @@
       </v-list>
     </v-navigation-drawer>
 
-    <v-main>
+    <v-main class="app-main">
       <router-view />
     </v-main>
   </v-app>
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useDisplay } from "vuetify";
+import { appNavItems } from "./app-navigation";
 
 const display = useDisplay();
-const drawer = ref(true);
-const isPermanent = display.smAndUp;
+const isPermanent = computed(() => display.lgAndUp.value);
+const drawer = ref(isPermanent.value);
 
-const navItems = [
-  {
-    title: "语音合成",
-    icon: "mdi-waveform",
-    to: "/synthesize"
+// watch isPermanent: 入参为当前断点是否大屏；功能是大屏固定展开，中小屏自动收起为临时抽屉。
+watch(
+  isPermanent,
+  (nextIsPermanent) => {
+    drawer.value = nextIsPermanent;
   },
   {
-    title: "音色克隆",
-    icon: "mdi-account-voice",
-    to: "/voice-clone"
-  },
-  {
-    title: "厂商",
-    icon: "mdi-server",
-    to: "/providers"
+    immediate: true
   }
-];
+);
+
+const navItems = appNavItems();
 </script>
+
+<style scoped>
+.app-main {
+  min-width: 0;
+}
+</style>

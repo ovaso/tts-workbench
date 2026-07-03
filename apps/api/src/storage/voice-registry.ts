@@ -32,6 +32,17 @@ export class InMemoryVoiceRegistry {
     return voice;
   }
 
+  // delete: 入参为平台 voiceId；功能是从本地 registry 删除受控音色并持久化，返回被删记录。
+  delete(voiceId: string): VoiceRecord | undefined {
+    const voice = this.voices.get(voiceId);
+    if (voice === undefined) {
+      return undefined;
+    }
+    this.voices.delete(voiceId);
+    this.persist();
+    return voice;
+  }
+
   // load: 无入参；功能是从本地文件读取 voice records，文件不存在时保持空 registry。
   private load(): void {
     if (!existsSync(this.filePath)) {

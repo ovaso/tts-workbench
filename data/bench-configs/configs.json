@@ -1,0 +1,20 @@
+{
+  "configs": [
+    {
+      "configId": "50253d9f69f419715c1b1aa20401751f6cd2c24dd8606ded50ec85eb7cbe16ff",
+      "digest": "50253d9f69f419715c1b1aa20401751f6cd2c24dd8606ded50ec85eb7cbe16ff",
+      "displayName": "Benchmark 配置",
+      "providerId": "minimax",
+      "modelId": "speech-2.8-hd",
+      "voice": {
+        "voiceId": "minimax:minimax_speech_2_8_hd_sd6g_cloned_20260703_female2"
+      },
+      "createdAt": "2026-07-03T09:31:45.021Z",
+      "updatedAt": "2026-07-03T09:31:45.021Z",
+      "output": {
+        "format": "mp3",
+        "sampleRateHz": 32000
+      }
+    }
+  ]
+}

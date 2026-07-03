@@ -3,6 +3,7 @@ import {
   type TTSSyncRequest,
   type TTSStreamRequest,
   type VoiceCloneRequest,
+  type VoiceCreateRequest,
   type VendorDirective
 } from "@tts-platform/core";
 import type { FastifyInstance } from "fastify";
@@ -42,6 +43,17 @@ export async function registerSynthesizeRoutes(
     return {
       voices: facade.listVoices(providerId === undefined ? {} : { providerId })
     };
+  });
+
+  app.post("/v1/voices", async (request, reply) => {
+    const voiceRequest = parseVoiceCreateRequest(request.body);
+    const voice = facade.createVoice(voiceRequest);
+    return reply.status(201).send({ voice });
+  });
+
+  app.delete<{ Params: { voiceId: string } }>("/v1/voices/:voiceId", async (request) => {
+    const voiceId = decodeURIComponent(request.params.voiceId);
+    return facade.deleteVoice(voiceId);
   });
 }
 
@@ -136,6 +148,31 @@ function parseVoiceCloneRequest(body: unknown): VoiceCloneRequest {
   const vendor = parseVendorDirective(input.vendor);
   if (vendor !== undefined) {
     request.vendor = vendor;
+  }
+  return request;
+}
+
+// parseVoiceCreateRequest: 入参为 HTTP body；输出手动登记到本地 registry 的音色请求。
+function parseVoiceCreateRequest(body: unknown): VoiceCreateRequest {
+  const input = requireObject(body, "request body");
+  const providerId = requireTrimmedString(input.providerId, "providerId");
+  const providerVoiceId = requireTrimmedString(input.providerVoiceId, "providerVoiceId");
+  const displayName = requireTrimmedString(input.displayName, "displayName");
+  const source = input.source === "vendor_builtin" ? "vendor_builtin" : "external";
+  const request: VoiceCreateRequest = {
+    providerId,
+    providerVoiceId,
+    displayName,
+    source
+  };
+  if (typeof input.modelId === "string" && input.modelId.trim().length > 0) {
+    request.modelId = input.modelId.trim();
+  }
+  if (typeof input.language === "string" && input.language.trim().length > 0) {
+    request.language = input.language.trim();
+  }
+  if (input.vendorMetadata !== undefined) {
+    request.vendorMetadata = requireObject(input.vendorMetadata, "vendorMetadata");
   }
   return request;
 }
@@ -306,4 +343,13 @@ function requireString(value: unknown, label: string): string {
     throw new TTSError(`${label} is required.`, "invalid_request", 400);
   }
   return value;
+}
+
+// requireTrimmedString: 入参为未知值和字段名；输出 trim 后非空字符串，否则抛出请求错误。
+function requireTrimmedString(value: unknown, label: string): string {
+  const parsed = requireString(value, label).trim();
+  if (parsed.length === 0) {
+    throw new TTSError(`${label} is required.`, "invalid_request", 400);
+  }
+  return parsed;
 }

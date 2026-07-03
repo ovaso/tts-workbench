@@ -6,11 +6,13 @@ import { MockTTSAdapter } from "./adapters/mock/adapter";
 import { AdapterRegistry } from "./facade/adapter-registry";
 import { TTSFacade } from "./facade/tts-facade";
 import { loadEnvFiles } from "./config/env";
+import { registerBenchConfigRoutes } from "./routes/bench-configs";
 import { registerHealthRoutes } from "./routes/health";
 import { registerProviderRoutes } from "./routes/providers";
 import { registerRunRoutes } from "./routes/runs";
 import { registerSynthesizeRoutes } from "./routes/synthesize";
 import { FileRunArchive } from "./storage/run-archive";
+import { FileBenchConfigRegistry } from "./storage/bench-config-registry";
 import { InMemoryVoiceRegistry } from "./storage/voice-registry";
 
 export interface BuildAppOptions {
@@ -29,7 +31,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   });
 
   await app.register(cors, {
-    origin: true
+    origin: true,
+    methods: ["GET", "POST", "DELETE", "OPTIONS"]
   });
 
   const registry = new AdapterRegistry([
@@ -41,6 +44,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   ]);
   const archive = new FileRunArchive(options.dataRoot);
   const voices = new InMemoryVoiceRegistry(options.dataRoot);
+  const benchConfigs = new FileBenchConfigRegistry(options.dataRoot);
   const facade = new TTSFacade(registry, archive, voices);
 
   app.setErrorHandler((error, _request, reply) => {
@@ -67,6 +71,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await registerProviderRoutes(app, facade);
   await registerSynthesizeRoutes(app, facade);
   await registerRunRoutes(app, archive);
+  await registerBenchConfigRoutes(app, benchConfigs);
 
   return app;
 }

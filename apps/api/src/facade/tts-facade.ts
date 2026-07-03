@@ -7,6 +7,8 @@ import {
   type TTSStreamSession,
   type VoiceCloneRequest,
   type VoiceCloneResult,
+  type VoiceCreateRequest,
+  type VoiceDeleteResult,
   type VoiceQuery,
   type VoiceRecord
 } from "@tts-platform/core";
@@ -95,6 +97,35 @@ export class TTSFacade {
 
   listVoices(query?: VoiceQuery): VoiceRecord[] {
     return this.voices.list(query);
+  }
+
+  // createVoice: 入参为手动登记音色请求；输出写入本地 registry 后的受控音色记录。
+  createVoice(request: VoiceCreateRequest): VoiceRecord {
+    return this.voices.save({
+      voiceId: `${request.providerId}:${request.providerVoiceId}`,
+      providerId: request.providerId,
+      providerVoiceId: request.providerVoiceId,
+      displayName: request.displayName,
+      source: request.source,
+      createdAt: new Date().toISOString(),
+      ...(request.modelId === undefined ? {} : { modelId: request.modelId }),
+      ...(request.language === undefined ? {} : { language: request.language }),
+      ...(request.vendorMetadata === undefined ? {} : { vendorMetadata: request.vendorMetadata })
+    });
+  }
+
+  // deleteVoice: 入参为平台 voiceId；输出本地受控音色删除结果，不调用厂商删除接口。
+  deleteVoice(voiceId: string): VoiceDeleteResult {
+    const voice = this.voices.delete(voiceId);
+    if (voice === undefined) {
+      throw new TTSError(`Voice '${voiceId}' was not found.`, "invalid_request", 404);
+    }
+    return {
+      voiceId: voice.voiceId,
+      providerId: voice.providerId,
+      providerVoiceId: voice.providerVoiceId,
+      deletedAt: new Date().toISOString()
+    };
   }
 
   // resolveVoiceSelection: 入参为同步合成请求；功能是把平台 voiceId 解析为厂商 providerVoiceId。

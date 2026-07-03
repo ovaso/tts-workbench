@@ -39,6 +39,7 @@ export interface ArchivedRunSummary {
   providerId: string;
   operation: TTSOperation;
   status: RunStatus;
+  errorReason?: string;
   createdAt: string;
   audio?: AudioArtifact;
   archive: {
@@ -96,10 +97,11 @@ export interface VoiceRecord {
   providerId: string;
   providerVoiceId: string;
   displayName: string;
-  source: "vendor_builtin" | "cloned";
+  source: "vendor_builtin" | "cloned" | "external";
+  modelId?: string;
   language?: string;
   createdAt: string;
-  sourceOperation: Extract<TTSOperation, "voice.clone.create" | "voice.clone.instant">;
+  sourceOperation?: Extract<TTSOperation, "voice.clone.create" | "voice.clone.instant">;
   clone?: {
     referenceAudioIds?: string[];
     createdAt: string;
@@ -111,6 +113,23 @@ export interface VoiceRecord {
 
 export interface VoiceQuery {
   providerId?: string;
+}
+
+export interface VoiceCreateRequest {
+  providerId: string;
+  providerVoiceId: string;
+  displayName: string;
+  source: "vendor_builtin" | "external";
+  modelId?: string;
+  language?: string;
+  vendorMetadata?: VendorPayload;
+}
+
+export interface VoiceDeleteResult {
+  voiceId: string;
+  providerId: string;
+  providerVoiceId: string;
+  deletedAt: string;
 }
 
 export interface VoiceCloneResult {

@@ -91,37 +91,138 @@
       {{ runsError }}
     </v-alert>
 
-    <div class="work-panel">
-      <v-table density="comfortable">
-        <thead>
-          <tr>
-            <th>运行 ID</th>
-            <th>厂商</th>
-            <th>创建时间</th>
-            <th>音频</th>
-            <th class="text-right">打开</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="run in synthesisRuns" :key="run.runId">
-            <td>{{ run.runId }}</td>
-            <td>{{ run.providerId }}</td>
-            <td>{{ formatLocalDateTime(run.createdAt) }}</td>
-            <td>{{ runAudioTitle(run) }}</td>
-            <td class="text-right">
-              <v-btn
-                icon="mdi-open-in-new"
-                size="small"
-                :to="`/runs/${run.runId}`"
-                variant="text"
-              />
-            </td>
-          </tr>
-          <tr v-if="synthesisRuns.length === 0">
-            <td colspan="5" class="text-medium-emphasis">暂无语音合成记录</td>
-          </tr>
-        </tbody>
-      </v-table>
+    <div class="work-panel pa-4">
+      <div v-if="synthesisRuns.length === 0" class="runs-empty-state">
+        <v-icon color="primary" icon="mdi-history" size="44" />
+        <div class="runs-empty-title">暂无语音合成记录</div>
+        <div class="runs-empty-body">运行一次语音合成后，归档记录会显示在这里。</div>
+      </div>
+
+      <div v-else class="runs-expansion-list">
+        <div class="runs-expansion-header">
+          <div class="run-row-grid">
+            <span>运行 ID</span>
+            <span>厂商</span>
+            <span class="run-status-header">状态</span>
+            <span>创建时间</span>
+            <span>音频</span>
+          </div>
+        </div>
+
+        <v-expansion-panels
+          v-model="expandedRunIds"
+          class="runs-expansion-panels"
+          multiple
+          @update:model-value="handleExpandedRuns"
+        >
+          <v-expansion-panel
+            v-for="run in synthesisRuns"
+            :key="run.runId"
+            class="run-panel"
+            :value="run.runId"
+          >
+            <v-expansion-panel-title class="run-panel-title">
+              <div class="run-row-grid">
+                <AutoScrollText :text="run.runId" mono />
+                <AutoScrollText :text="run.providerId" />
+                <div class="run-status-cell">
+                  <v-tooltip :text="runStatusTooltip(run)" location="top">
+                    <template #activator="{ props }">
+                      <v-icon
+                        v-bind="props"
+                        :color="runStatusColor(run.status)"
+                        :icon="runStatusIcon(run.status)"
+                        size="20"
+                      />
+                    </template>
+                  </v-tooltip>
+                </div>
+                <span>{{ formatLocalDateTime(run.createdAt) }}</span>
+                <AutoScrollText :text="runAudioTitle(run)" />
+              </div>
+            </v-expansion-panel-title>
+
+            <v-expansion-panel-text>
+              <div class="run-expansion-panel">
+                <div class="inline-detail-header">
+                  <div>
+                    <h3>{{ run.runId }}</h3>
+                    <div class="inline-detail-meta">
+                      {{ run.providerId }} · {{ formatLocalDateTime(run.createdAt) }}
+                    </div>
+                  </div>
+                  <v-btn
+                    icon="mdi-refresh"
+                    :loading="runDetailLoadingByRunId[run.runId] === true"
+                    variant="text"
+                    @click.stop="loadRunDetail(run.runId)"
+                  />
+                </div>
+
+                <v-alert
+                  v-if="runDetailErrorByRunId[run.runId]"
+                  class="my-4"
+                  type="error"
+                  variant="tonal"
+                >
+                  {{ runDetailErrorByRunId[run.runId] }}
+                </v-alert>
+
+                <v-progress-linear
+                  v-if="runDetailLoadingByRunId[run.runId] === true"
+                  class="my-4"
+                  color="primary"
+                  indeterminate
+                />
+
+                <div v-if="runDetailsByRunId[run.runId]">
+                  <AudioPlayer
+                    v-if="runDetailsByRunId[run.runId]?.result.audio?.url"
+                    class="mb-4"
+                    :format="runDetailsByRunId[run.runId]?.result.audio?.format ?? 'mp3'"
+                    :src="runDetailsByRunId[run.runId]?.result.audio?.url ?? ''"
+                  />
+                  <v-tabs
+                    v-model="runDetailTabByRunId[run.runId]"
+                    class="run-detail-tabs"
+                    color="primary"
+                    density="comfortable"
+                  >
+                    <v-tab v-for="tab in runDetailTabItems" :key="tab.value" :value="tab.value">
+                      {{ tab.title }}
+                    </v-tab>
+                  </v-tabs>
+
+                  <v-window v-model="runDetailTabByRunId[run.runId]" class="mt-4">
+                    <v-window-item value="request">
+                      <JsonViewer :value="runDetailsByRunId[run.runId]?.request" />
+                    </v-window-item>
+                    <v-window-item value="plan">
+                      <JsonViewer :value="runDetailsByRunId[run.runId]?.plan" />
+                    </v-window-item>
+                    <v-window-item value="mapping">
+                      <JsonViewer :value="runDetailsByRunId[run.runId]?.mappingReport" />
+                    </v-window-item>
+                    <v-window-item value="result">
+                      <JsonViewer :value="runDetailsByRunId[run.runId]?.result" />
+                    </v-window-item>
+                    <v-window-item value="vendor">
+                      <v-row>
+                        <v-col cols="12" md="6">
+                          <JsonViewer :value="runDetailsByRunId[run.runId]?.vendorRequest" />
+                        </v-col>
+                        <v-col cols="12" md="6">
+                          <JsonViewer :value="runDetailsByRunId[run.runId]?.vendorResponse" />
+                        </v-col>
+                      </v-row>
+                    </v-window-item>
+                  </v-window>
+                </div>
+              </div>
+            </v-expansion-panel-text>
+          </v-expansion-panel>
+        </v-expansion-panels>
+      </div>
     </div>
   </section>
 </template>
@@ -135,10 +236,12 @@ import type {
   VendorPayload
 } from "@tts-platform/core";
 import { computed, onMounted, ref, watch } from "vue";
-import { useRouter } from "vue-router";
+import AudioPlayer from "../components/AudioPlayer.vue";
+import AutoScrollText from "../components/AutoScrollText.vue";
+import JsonViewer from "../components/JsonViewer.vue";
 import ProviderSelector from "../components/ProviderSelector.vue";
 import VendorExtensionEditor from "../components/VendorExtensionEditor.vue";
-import { listRuns } from "../api/runs";
+import { getRun, listRuns, type RunDetail } from "../api/runs";
 import { synthesizeSync } from "../api/tts";
 import { listVoices } from "../api/voices";
 import { useProvidersStore } from "../stores/providers";
@@ -157,10 +260,16 @@ import {
   vendorExtensionTemplateForOperation,
   voiceOptions
 } from "./synthesize-options";
-import { runAudioTitle, syncSynthesisRuns } from "./synthesize-runs";
+import {
+  runAudioTitle,
+  runDetailTabs,
+  runStatusColor,
+  runStatusIcon,
+  runStatusTooltip,
+  syncSynthesisRuns
+} from "./synthesize-runs";
 import { type ComboboxOption, voiceInputValue } from "./synthesize-submit";
 
-const router = useRouter();
 const store = useProvidersStore();
 
 const providerId = ref("minimax");
@@ -179,6 +288,11 @@ const voiceItems = ref<Array<{ title: string; value: string }>>([]);
 const runs = ref<ArchivedRunSummary[]>([]);
 const runsLoading = ref(false);
 const runsError = ref("");
+const runDetailsByRunId = ref<Record<string, RunDetail | undefined>>({});
+const runDetailLoadingByRunId = ref<Record<string, boolean | undefined>>({});
+const runDetailErrorByRunId = ref<Record<string, string | undefined>>({});
+const runDetailTabByRunId = ref<Record<string, string | undefined>>({});
+const expandedRunIds = ref<string[]>([]);
 
 const vendorModeItems: Array<{ title: string; value: VendorDirectiveMode }> = [
   {
@@ -194,6 +308,7 @@ const vendorModeItems: Array<{ title: string; value: VendorDirectiveMode }> = [
     value: "vendor_required"
   }
 ];
+const runDetailTabItems = runDetailTabs();
 const currentCapabilities = computed(() => store.capabilities[providerId.value]);
 const currentModel = computed(() => modelById(currentCapabilities.value, model.value));
 const modelItems = computed(() => modelOptions(currentCapabilities.value));
@@ -285,11 +400,62 @@ async function submit() {
 
     const result = await synthesizeSync(request);
     await loadRuns();
-    await router.push(`/runs/${result.runId}`);
+    if (!expandedRunIds.value.includes(result.runId)) {
+      expandedRunIds.value = [result.runId, ...expandedRunIds.value];
+    }
+    await loadRunDetail(result.runId);
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : "语音合成失败。";
   } finally {
     submitting.value = false;
+  }
+}
+
+// handleExpandedRuns: 入参为当前展开 runId 数组；功能是支持多个 expansion panel 同时展开并补充加载详情。
+async function handleExpandedRuns(nextRunIds: string[]) {
+  expandedRunIds.value = nextRunIds;
+  const unloadedRunIds = nextRunIds.filter((runId) => runDetailsByRunId.value[runId] === undefined);
+  for (const runId of unloadedRunIds) {
+    await loadRunDetail(runId);
+  }
+}
+
+// loadRunDetail: 入参为 runId；功能是加载同步合成运行详情并展示请求、计划、映射和厂商审计 tabs。
+async function loadRunDetail(runId: string) {
+  runDetailLoadingByRunId.value = {
+    ...runDetailLoadingByRunId.value,
+    [runId]: true
+  };
+  runDetailErrorByRunId.value = {
+    ...runDetailErrorByRunId.value,
+    [runId]: undefined
+  };
+  if (runDetailTabByRunId.value[runId] === undefined) {
+    runDetailTabByRunId.value = {
+      ...runDetailTabByRunId.value,
+      [runId]: "mapping"
+    };
+  }
+  try {
+    const detail = await getRun(runId);
+    runDetailsByRunId.value = {
+      ...runDetailsByRunId.value,
+      [runId]: detail
+    };
+  } catch (caught) {
+    runDetailsByRunId.value = {
+      ...runDetailsByRunId.value,
+      [runId]: undefined
+    };
+    runDetailErrorByRunId.value = {
+      ...runDetailErrorByRunId.value,
+      [runId]: caught instanceof Error ? caught.message : "加载运行详情失败。"
+    };
+  } finally {
+    runDetailLoadingByRunId.value = {
+      ...runDetailLoadingByRunId.value,
+      [runId]: false
+    };
   }
 }
 
@@ -382,3 +548,167 @@ onMounted(async () => {
   await loadRuns();
 });
 </script>
+
+<style scoped>
+.runs-expansion-list {
+  overflow-x: auto;
+}
+
+.run-row-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.8fr) minmax(88px, 0.55fr) minmax(76px, 0.45fr) minmax(156px, 0.9fr) minmax(112px, 0.65fr);
+  gap: 12px;
+  align-items: center;
+  min-width: 760px;
+}
+
+.runs-expansion-header {
+  padding: 0 48px 8px 24px;
+  color: #344054;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.run-status-header,
+.run-status-cell {
+  justify-self: center;
+}
+
+.run-status-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+}
+
+.runs-expansion-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 760px;
+}
+
+.run-panel {
+  border: 1px solid #e4e8f0;
+  border-bottom-width: 0;
+  border-radius: 0;
+  box-shadow: none;
+  transition:
+    margin 160ms ease,
+    border-color 160ms ease,
+    border-radius 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.run-panel:first-child {
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+}
+
+.run-panel:last-child {
+  border-bottom-width: 1px;
+  border-bottom-right-radius: 8px;
+  border-bottom-left-radius: 8px;
+}
+
+.run-panel + .run-panel {
+  margin-top: 0;
+}
+
+.run-panel.v-expansion-panel--active {
+  z-index: 1;
+  margin: 12px 0;
+  border: 1px solid #c6d4ea;
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(23, 32, 51, 0.08);
+}
+
+.run-panel.v-expansion-panel--active + .run-panel {
+  border-top-width: 1px;
+}
+
+.run-panel-title {
+  color: #172033;
+  min-height: 48px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.run-panel-title :deep(.v-expansion-panel-title__overlay) {
+  opacity: 0;
+}
+
+.run-panel :deep(.v-expansion-panel-text__wrapper) {
+  padding: 0;
+}
+
+.run-expansion-panel {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: 16px;
+  border: 0;
+  border-top: 1px solid #d9e1ee;
+  border-left: 3px solid rgb(var(--v-theme-primary));
+  background: #fbfcff;
+}
+
+.inline-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.inline-detail-header h3 {
+  color: #172033;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.inline-detail-meta {
+  margin-top: 4px;
+  color: #475467;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.run-detail-tabs {
+  color: #344054;
+}
+
+.run-detail-tabs :deep(.v-tab) {
+  color: #344054;
+  font-weight: 600;
+}
+
+.run-detail-tabs :deep(.v-tab--selected) {
+  color: rgb(var(--v-theme-primary));
+}
+
+.runs-empty-state {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  min-height: 180px;
+  border: 1px dashed #b7c4d8;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #667085;
+  text-align: center;
+}
+
+.runs-empty-title {
+  color: #172033;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.runs-empty-body {
+  max-width: 360px;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+</style>
