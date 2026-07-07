@@ -39,4 +39,4 @@ Thumbs.db
 
 # TypeScript
 *.tsbuildinfo
-mise.toml
+/mise.toml
