@@ -11,12 +11,16 @@ import { AdapterRegistry } from "./facade/adapter-registry";
 import { TTSFacade } from "./facade/tts-facade";
 import { loadEnvFiles } from "./config/env";
 import { registerBenchConfigRoutes } from "./routes/bench-configs";
+import { registerBenchmarkPlanRoutes } from "./routes/benchmark-plans";
+import { registerCorpusRoutes } from "./routes/corpus";
 import { registerHealthRoutes } from "./routes/health";
 import { registerProviderRoutes } from "./routes/providers";
 import { registerRunRoutes } from "./routes/runs";
 import { registerSynthesizeRoutes } from "./routes/synthesize";
 import { FileRunArchive } from "./storage/run-archive";
 import { FileBenchConfigRegistry } from "./storage/bench-config-registry";
+import { FileBenchmarkPlanArchive } from "./storage/benchmark-plan-archive";
+import { FileCorpusRegistry } from "./storage/corpus-registry";
 import { InMemoryVoiceRegistry } from "./storage/voice-registry";
 import { StreamSessionRegistry } from "./stream/stream-session-registry";
 
@@ -83,6 +87,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   const archive = new FileRunArchive(options.dataRoot);
   const voices = new InMemoryVoiceRegistry(options.dataRoot);
   const benchConfigs = new FileBenchConfigRegistry(options.dataRoot);
+  const corpus = new FileCorpusRegistry(options.dataRoot);
+  const benchmarkPlans = new FileBenchmarkPlanArchive(corpus, benchConfigs, options.dataRoot);
   const streamSessions = new StreamSessionRegistry();
   const facade = new TTSFacade(registry, archive, voices);
 
@@ -111,6 +117,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await registerSynthesizeRoutes(app, facade, archive, streamSessions);
   await registerRunRoutes(app, archive);
   await registerBenchConfigRoutes(app, benchConfigs);
+  await registerCorpusRoutes(app, corpus);
+  await registerBenchmarkPlanRoutes(app, benchmarkPlans);
 
   return app;
 }

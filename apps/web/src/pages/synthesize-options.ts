@@ -1,9 +1,11 @@
 import type {
+  CanonicalControlName,
   CanonicalControlCapability,
   TTSCapabilities,
   TTSOperation,
   TTSOutputFormat,
   TTSVendorModel,
+  VoiceCompatibility,
   VoiceRecord,
   VendorPayload
 } from "@tts-platform/core";
@@ -13,24 +15,59 @@ export interface SelectOption<T extends string | number> {
   value: T;
 }
 
-// modelOptions: 入参为 provider capability；输出当前 provider 可用于表单选择的模型选项。
-export function modelOptions(capabilities: TTSCapabilities | undefined): SelectOption<string>[] {
+export interface NumericControlBounds {
+  min?: number;
+  max?: number;
+  defaultValue?: number;
+}
+
+// operationModels: 入参为 provider capability 和 operation；输出该 operation 可用的模型列表。
+export function operationModels(
+  capabilities: TTSCapabilities | undefined,
+  operation: TTSOperation
+): TTSVendorModel[] {
+  if (capabilities?.operations[operation]?.supported !== true) {
+    return [];
+  }
+  return capabilities.vendorModels.filter((model) => model.canonicalCapabilities.supportedOperations.includes(operation));
+}
+
+// providerSupportsOperation: 入参为 provider capability 和 operation；输出该厂商是否至少有一个模型支持该 operation。
+export function providerSupportsOperation(
+  capabilities: TTSCapabilities | undefined,
+  operation: TTSOperation
+): boolean {
+  return operationModels(capabilities, operation).length > 0;
+}
+
+// modelOptions: 入参为 provider capability 和可选 operation；输出当前表单可选择的模型选项。
+export function modelOptions(
+  capabilities: TTSCapabilities | undefined,
+  operation?: TTSOperation,
+  voice?: VoiceRecord
+): SelectOption<string>[] {
+  const models = operation === undefined ? capabilities?.vendorModels ?? [] : operationModels(capabilities, operation);
   return (
-    capabilities?.vendorModels.map((model) => ({
+    models.filter((model) => isModelCompatibleWithVoice(model.modelId, voice?.compatibility)).map((model) => ({
       title: model.displayName ?? model.modelId,
       value: model.modelId
-    })) ?? []
+    }))
   );
 }
 
 // defaultModelForOperation: 入参为 provider capability 和 operation；输出该 operation 的默认模型 id。
 export function defaultModelForOperation(
   capabilities: TTSCapabilities | undefined,
-  operation: TTSOperation
+  operation: TTSOperation,
+  voice?: VoiceRecord
 ): string {
+  const models = operationModels(capabilities, operation).filter((model) =>
+    isModelCompatibleWithVoice(model.modelId, voice?.compatibility)
+  );
   return (
-    capabilities?.vendorModels.find((model) => model.defaultForOperations?.includes(operation))?.modelId ??
-    capabilities?.vendorModels[0]?.modelId ??
+    compatibleModelIds(voice?.compatibility).find((modelId) => models.some((model) => model.modelId === modelId)) ??
+    models.find((model) => model.defaultForOperations?.includes(operation))?.modelId ??
+    models[0]?.modelId ??
     ""
   );
 }
@@ -38,9 +75,14 @@ export function defaultModelForOperation(
 // modelById: 入参为 provider capability 和模型 id；输出匹配的 vendor model。
 export function modelById(
   capabilities: TTSCapabilities | undefined,
-  modelId: string
+  modelId: string,
+  operation?: TTSOperation
 ): TTSVendorModel | undefined {
-  return capabilities?.vendorModels.find((model) => model.modelId === modelId);
+  const model = capabilities?.vendorModels.find((candidate) => candidate.modelId === modelId);
+  if (operation !== undefined && model?.canonicalCapabilities.supportedOperations.includes(operation) !== true) {
+    return undefined;
+  }
+  return model;
 }
 
 // supportsOperation: 入参为厂商能力、模型和 operation；输出当前页面是否应开放该 operation。
@@ -55,14 +97,31 @@ export function supportsOperation(
   );
 }
 
-// formatOptionsForModel: 入参为 vendor model；输出该模型支持的编码格式选项。
-export function formatOptionsForModel(model: TTSVendorModel | undefined): TTSOutputFormat[] {
-  return model?.canonicalCapabilities.outputFormats ?? [];
+// formatOptionsForModel: 入参为 vendor model、provider capability 和 operation；输出该模型支持的编码格式选项。
+export function formatOptionsForModel(
+  model: TTSVendorModel | undefined,
+  capabilities?: TTSCapabilities,
+  operation: Extract<TTSOperation, "tts.sync" | "tts.stream"> = "tts.sync"
+): TTSOutputFormat[] {
+  if (operation === "tts.stream") {
+    return (
+      model?.canonicalCapabilities.outputChunkFormats ??
+      capabilities?.operations["tts.stream"]?.outputChunkFormats ??
+      model?.canonicalCapabilities.outputFormats ??
+      capabilities?.operations["tts.stream"]?.outputFormats ??
+      []
+    );
+  }
+  return model?.canonicalCapabilities.outputFormats ?? capabilities?.operations["tts.sync"]?.outputFormats ?? [];
 }
 
-// sampleRateOptionsForModel: 入参为 vendor model；输出该模型支持的采样率选项。
-export function sampleRateOptionsForModel(model: TTSVendorModel | undefined): number[] {
-  return model?.canonicalCapabilities.sampleRatesHz ?? [];
+// sampleRateOptionsForModel: 入参为 vendor model、provider capability 和 operation；输出该模型支持的采样率选项。
+export function sampleRateOptionsForModel(
+  model: TTSVendorModel | undefined,
+  capabilities?: TTSCapabilities,
+  operation: Extract<TTSOperation, "tts.sync" | "tts.stream"> = "tts.sync"
+): number[] {
+  return model?.canonicalCapabilities.sampleRatesHz ?? capabilities?.operations[operation]?.sampleRatesHz ?? [];
 }
 
 // languageOptionsForModel: 入参为 vendor model；输出该模型声明的语言选项。
@@ -75,13 +134,25 @@ export function languageOptionsForModel(model: TTSVendorModel | undefined): Sele
 }
 
 // defaultFormatForModel: 入参为 vendor model；输出模型默认编码格式或第一个支持格式。
-export function defaultFormatForModel(model: TTSVendorModel | undefined): TTSOutputFormat | undefined {
-  return model?.defaultConfiguration?.output?.format ?? model?.canonicalCapabilities.outputFormats?.[0];
+export function defaultFormatForModel(
+  model: TTSVendorModel | undefined,
+  capabilities?: TTSCapabilities,
+  operation: Extract<TTSOperation, "tts.sync" | "tts.stream"> = "tts.sync"
+): TTSOutputFormat | undefined {
+  const formats = formatOptionsForModel(model, capabilities, operation);
+  const configured = model?.defaultConfiguration?.output?.format;
+  return configured !== undefined && formats.includes(configured) ? configured : formats[0];
 }
 
 // defaultSampleRateForModel: 入参为 vendor model；输出模型默认采样率或第一个支持采样率。
-export function defaultSampleRateForModel(model: TTSVendorModel | undefined): number | undefined {
-  return model?.defaultConfiguration?.output?.sampleRateHz ?? model?.canonicalCapabilities.sampleRatesHz?.[0];
+export function defaultSampleRateForModel(
+  model: TTSVendorModel | undefined,
+  capabilities?: TTSCapabilities,
+  operation: Extract<TTSOperation, "tts.sync" | "tts.stream"> = "tts.sync"
+): number | undefined {
+  const sampleRates = sampleRateOptionsForModel(model, capabilities, operation);
+  const configured = model?.defaultConfiguration?.output?.sampleRateHz;
+  return configured !== undefined && sampleRates.includes(configured) ? configured : sampleRates[0];
 }
 
 // defaultLanguageForModel: 入参为 vendor model；输出模型默认语言或第一个语言选项。
@@ -104,12 +175,68 @@ export function requiresExplicitVoiceForModel(model: TTSVendorModel | undefined)
   return model?.defaultConfiguration?.voice?.providerVoiceId === undefined;
 }
 
-// voiceOptions: 入参为本地 voice registry 音色列表和当前模型；输出合成页按模型过滤后的音色选项。
-export function voiceOptions(voices: VoiceRecord[], modelId?: string): SelectOption<string>[] {
-  return voices.filter((voice) => voice.modelId === undefined || voice.modelId === modelId).map((voice) => ({
+// voiceOptions: 入参为已按 provider 查询的本地 voice registry；输出厂商级音色选项，不按合成模型二次过滤。
+export function voiceOptions(voices: VoiceRecord[]): SelectOption<string>[] {
+  return voices.map((voice) => ({
     title: `${voice.displayName} (${voice.providerVoiceId})`,
     value: voice.voiceId
   }));
+}
+
+// isModelCompatibleWithVoice: 入参为模型 id 和音色兼容事实；输出模型是否可与该音色一起合成。
+export function isModelCompatibleWithVoice(
+  modelId: string,
+  compatibility: VoiceCompatibility | undefined
+): boolean {
+  const ids = compatibleModelIds(compatibility);
+  return ids.length === 0 || ids.includes(modelId);
+}
+
+// compatibleModelIds: 入参为音色兼容事实；输出强绑定时允许使用的模型 id 列表。
+function compatibleModelIds(compatibility: VoiceCompatibility | undefined): string[] {
+  if (compatibility?.scope === "model") {
+    return compatibility.modelIds;
+  }
+  if (compatibility?.scope === "resource") {
+    return compatibility.compatibleModelIds ?? [];
+  }
+  return [];
+}
+
+// controlCapabilityForModel: 入参为模型、厂商能力、operation 和控制项；输出该控制项的有效 capability。
+export function controlCapabilityForModel(
+  model: TTSVendorModel | undefined,
+  capabilities: TTSCapabilities | undefined,
+  operation: Extract<TTSOperation, "tts.sync" | "tts.stream">,
+  control: CanonicalControlName
+): CanonicalControlCapability | undefined {
+  return model?.canonicalCapabilities.canonicalControls[control] ?? capabilities?.operations[operation]?.canonicalControls[control];
+}
+
+// supportsCanonicalControl: 入参为模型、厂商能力、operation 和控制项；输出表单是否应开放该控制项。
+export function supportsCanonicalControl(
+  model: TTSVendorModel | undefined,
+  capabilities: TTSCapabilities | undefined,
+  operation: Extract<TTSOperation, "tts.sync" | "tts.stream">,
+  control: CanonicalControlName
+): boolean {
+  const capability = controlCapabilityForModel(model, capabilities, operation, control);
+  return capability?.support === "supported" || capability?.support === "approximated";
+}
+
+// numericControlBounds: 入参为模型、厂商能力、operation 和控制项；输出数字控件可使用的范围和默认值。
+export function numericControlBounds(
+  model: TTSVendorModel | undefined,
+  capabilities: TTSCapabilities | undefined,
+  operation: Extract<TTSOperation, "tts.sync" | "tts.stream">,
+  control: Extract<CanonicalControlName, "speed" | "pitch" | "volume">
+): NumericControlBounds {
+  const capability = controlCapabilityForModel(model, capabilities, operation, control);
+  return {
+    ...(typeof capability?.min === "number" ? { min: capability.min } : {}),
+    ...(typeof capability?.max === "number" ? { max: capability.max } : {}),
+    ...(typeof capability?.defaultValue === "number" ? { defaultValue: capability.defaultValue } : {})
+  };
 }
 
 // vendorExtensionTemplateForOperation: 入参为厂商能力、operation 和模型；输出该 operation 的厂商参数完整模板。

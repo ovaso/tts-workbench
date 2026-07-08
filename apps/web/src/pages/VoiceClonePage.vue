@@ -169,7 +169,7 @@
           />
           <v-combobox
             v-model="manualModelId"
-            :items="modelItems"
+            :items="manualModelItems"
             label="模型 ID"
             prepend-inner-icon="mdi-cube"
             variant="outlined"
@@ -214,7 +214,7 @@
               <ProviderSelector v-model="providerId" :providers="store.providers" />
               <v-select
                 v-model="model"
-                :items="modelItems"
+                :items="cloneModelItems"
                 label="模型"
                 prepend-inner-icon="mdi-cube"
                 variant="outlined"
@@ -345,8 +345,9 @@ const voiceTableHeaders = [
   { title: "操作", key: "actions", align: "end" as const, sortable: false }
 ];
 const currentCapabilities = computed(() => store.capabilities[providerId.value]);
-const currentModel = computed(() => modelById(currentCapabilities.value, model.value));
-const modelItems = computed(() => modelOptions(currentCapabilities.value));
+const currentModel = computed(() => modelById(currentCapabilities.value, model.value, "voice.clone.create"));
+const cloneModelItems = computed(() => modelOptions(currentCapabilities.value, "voice.clone.create"));
+const manualModelItems = computed(() => modelOptions(currentCapabilities.value, "tts.sync"));
 const vendorExtensionTemplate = computed(() =>
   vendorExtensionTemplateForOperation(currentCapabilities.value, "voice.clone.create", currentModel.value)
 );
@@ -376,7 +377,7 @@ const canSubmitClone = computed(
   () =>
     cloneCapability.value !== undefined &&
     providerId.value.length > 0 &&
-    model.value.length > 0 &&
+    currentModel.value !== undefined &&
     voiceName.value.trim().length > 0 &&
     referenceFile.value !== undefined &&
     !submittingClone.value
@@ -452,6 +453,8 @@ function applyProviderDefaults(capabilities: typeof currentCapabilities.value) {
   const nextModel = defaultModelForOperation(capabilities, "voice.clone.create");
   if (nextModel.length > 0) {
     model.value = nextModel;
+  } else {
+    model.value = "";
   }
 }
 
@@ -563,11 +566,13 @@ async function submitVoiceTest() {
       success.value = `合成测试完成：${testResult.value.runId}`;
       return;
     }
+    const capabilities = await store.loadCapabilities(selectedVoice.providerId);
+    const synthesisModel = defaultModelForOperation(capabilities, "tts.sync", selectedVoice);
     const request: TTSSyncRequest = {
       operation: "tts.sync",
       providerId: selectedVoice.providerId,
       text: testText.value.trim(),
-      ...(selectedVoice.modelId === undefined ? {} : { model: selectedVoice.modelId }),
+      ...(synthesisModel.length === 0 ? {} : { model: synthesisModel }),
       voice: {
         voiceId: testVoiceId.value
       }
@@ -583,11 +588,13 @@ async function submitVoiceTest() {
 
 // runCosyVoiceStreamVoiceTest: 入参为受控音色；功能是用 CosyVoice 流式合成完成音色测试并读取归档结果。
 async function runCosyVoiceStreamVoiceTest(selectedVoice: VoiceRecord): Promise<ArchivedRunSummary> {
+  const capabilities = await store.loadCapabilities(selectedVoice.providerId);
+  const synthesisModel = defaultModelForOperation(capabilities, "tts.stream", selectedVoice);
   const request: TTSStreamRequest = {
     operation: "tts.stream",
     providerId: selectedVoice.providerId,
     text: testText.value.trim(),
-    ...(selectedVoice.modelId === undefined ? {} : { model: selectedVoice.modelId }),
+    ...(synthesisModel.length === 0 ? {} : { model: synthesisModel }),
     voice: {
       voiceId: selectedVoice.voiceId
     },

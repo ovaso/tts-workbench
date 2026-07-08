@@ -20,13 +20,17 @@ import {
   type VendorExtensionInput,
   type VendorExtensionSchema,
   type VendorPayload,
+  type VoiceCompatibility,
   type VoiceClonePlan,
-  type VoiceCloneResult
+  type VoiceCloneResult,
+  type VoiceRecord
 } from "@tts-platform/core";
 import { createPlanId } from "../../utils/ids";
 import {
   DOUBAO_ADAPTER_VERSION,
+  DOUBAO_DEFAULT_CLONE_RESOURCE_ID,
   DOUBAO_DEFAULT_RESOURCE_ID,
+  DOUBAO_DEFAULT_TTS_RESOURCE_ID,
   DOUBAO_PROVIDER_ID,
   doubaoCapabilities
 } from "./capabilities";
@@ -37,6 +41,13 @@ const DEFAULT_NAMESPACE = "BidirectionalTTS";
 const DEFAULT_UID = "tts_workbench";
 const DEFAULT_TTS_MODEL = "seed-tts-2.0-standard";
 const SUCCESS_CODES = new Set([0, 20000000]);
+const DOUBAO_CLONE_RESOURCE_IDS = ["seed-icl-2.0", "seed-icl-1.0", "seed-icl-1.0-concurr"] as const;
+const DOUBAO_SYNTHESIS_RESOURCE_IDS = [
+  "seed-tts-2.0",
+  "seed-tts-1.0",
+  "seed-tts-1.0-concurr",
+  ...DOUBAO_CLONE_RESOURCE_IDS
+] as const;
 
 export interface DoubaoAdapterOptions {
   apiKey?: string | undefined;
@@ -80,6 +91,25 @@ export class DoubaoTTSAdapter implements TTSAdapter {
     return doubaoExtensionSchema(operation);
   }
 
+  // voiceCompatibility: 入参为本地 voice 记录；输出豆包 speaker 与 X-Api-Resource-Id 的强匹配关系。
+  voiceCompatibility(voice: VoiceRecord): VoiceCompatibility | undefined {
+    if (voice.compatibility !== undefined) {
+      return voice.compatibility;
+    }
+    const resourceId = doubaoCloneResourceIdFromVoice(voice);
+    if (resourceId === undefined) {
+      return voice.modelId === undefined
+        ? undefined
+        : {
+            scope: "provider",
+            enforced: false,
+            preferredModelIds: [voice.modelId],
+            notes: ["豆包非复刻音色暂按厂商级音色处理，modelId 只作为推荐模型。"]
+          };
+    }
+    return doubaoVoiceResourceCompatibility(resourceId);
+  }
+
   // plan: 入参为平台 operation request；输出豆包 plan，包含 vendor request 和 mapping report。
   async plan(request: TTSOperationRequest): Promise<TTSSyncPlan | TTSStreamPlan | VoiceClonePlan> {
     if (request.operation === "voice.clone.create") {
@@ -95,10 +125,18 @@ export class DoubaoTTSAdapter implements TTSAdapter {
       throw new TTSError("Doubao does not support this operation.", "operation_not_supported", 400);
     }
 
-    const resourceId = request.model ?? defaultModelId(capabilitySnapshot.vendorModels, request.operation);
-    const model = capabilitySnapshot.vendorModels.find((candidate) => candidate.modelId === resourceId);
+    const requestedModelId = request.model ?? defaultModelId(capabilitySnapshot.vendorModels, request.operation);
+    const model = capabilitySnapshot.vendorModels.find((candidate) => candidate.modelId === requestedModelId);
     if (model === undefined) {
-      throw new TTSError(`Doubao resource id '${resourceId}' was not found.`, "invalid_request", 400);
+      throw new TTSError(`Doubao model '${requestedModelId}' was not found.`, "invalid_request", 400);
+    }
+    if (!model.canonicalCapabilities.supportedOperations.includes(request.operation)) {
+      throw new TTSError(`Doubao model '${requestedModelId}' does not support '${request.operation}'.`, "invalid_request", 400);
+    }
+    const voiceResourceId = doubaoResourceIdFromCompatibility(request.voice.compatibility);
+    const resourceId = voiceResourceId ?? requestedModelId;
+    if (!isDoubaoSynthesisResourceId(resourceId)) {
+      throw new TTSError(`Doubao resource id '${resourceId}' is not declared as a synthesis resource.`, "invalid_request", 400);
     }
 
     const directiveMode = request.vendor?.mode ?? "prefer_vendor";
@@ -136,8 +174,10 @@ export class DoubaoTTSAdapter implements TTSAdapter {
 
     appliedCanonicalFields.push(applied("text", request.text, "req_params.text"));
     appliedCanonicalFields.push(applied("voice", requestedVoice, "req_params.speaker"));
-    if (request.model !== undefined) {
-      appliedCanonicalFields.push(applied("model", resourceId, "headers.X-Api-Resource-Id"));
+    if (voiceResourceId !== undefined) {
+      appliedCanonicalFields.push(applied("voice.compatibility.resourceIds[0]", voiceResourceId, "headers.X-Api-Resource-Id"));
+    } else if (request.model !== undefined) {
+      appliedCanonicalFields.push(applied("model", requestedModelId, "headers.X-Api-Resource-Id"));
     }
     if (requestedFormat !== undefined && supportedFormats.includes(requestedFormat)) {
       appliedCanonicalFields.push(applied("output.format", requestedFormat, "req_params.audio_params.format"));
@@ -254,6 +294,13 @@ export class DoubaoTTSAdapter implements TTSAdapter {
       appliedVendorExtensions,
       ignoredFields
     });
+    if (voiceResourceId !== undefined && vendorRequest.resourceId !== voiceResourceId) {
+      throw new TTSError(
+        `Doubao voice '${requestedVoice}' requires X-Api-Resource-Id '${voiceResourceId}', but request resolved '${String(vendorRequest.resourceId ?? "")}'.`,
+        "invalid_request",
+        400
+      );
+    }
 
     const mappingReport: MappingReport = {
       providerId: this.providerId,
@@ -387,7 +434,9 @@ export class DoubaoTTSAdapter implements TTSAdapter {
       providerVoiceId,
       displayName: plan.canonicalRequest.displayName,
       source: "cloned" as const,
-      modelId: plan.canonicalRequest.model ?? DOUBAO_DEFAULT_RESOURCE_ID,
+      createdWithModelId: plan.canonicalRequest.model ?? DOUBAO_DEFAULT_CLONE_RESOURCE_ID,
+      preferredModelId: DOUBAO_DEFAULT_TTS_RESOURCE_ID,
+      compatibility: doubaoVoiceResourceCompatibility(plan.canonicalRequest.model ?? DOUBAO_DEFAULT_CLONE_RESOURCE_ID),
       ...(plan.canonicalRequest.language === undefined ? {} : { language: plan.canonicalRequest.language }),
       createdAt: new Date().toISOString(),
       sourceOperation: "voice.clone.create" as const,
@@ -401,6 +450,7 @@ export class DoubaoTTSAdapter implements TTSAdapter {
           : { consentScope: plan.canonicalRequest.consent.usageScope })
       },
       vendorMetadata: {
+        cloneModelId: plan.canonicalRequest.model ?? DOUBAO_DEFAULT_CLONE_RESOURCE_ID,
         status: objectAt(vendorResponse, "status"),
         speakerStatus: objectAt(vendorResponse, "speaker_status")
       }
@@ -428,6 +478,9 @@ export class DoubaoTTSAdapter implements TTSAdapter {
     const model = capabilitySnapshot.vendorModels.find((candidate) => candidate.modelId === modelId);
     if (model === undefined) {
       throw new TTSError(`Doubao resource id '${modelId}' was not found.`, "invalid_request", 400);
+    }
+    if (!model.canonicalCapabilities.supportedOperations.includes("voice.clone.create")) {
+      throw new TTSError(`Doubao resource id '${modelId}' does not support voice.clone.create.`, "invalid_request", 400);
     }
 
     const directiveMode = request.vendor?.mode ?? "prefer_vendor";
@@ -663,6 +716,13 @@ function applyTtsVendorExtension(input: ApplyTtsVendorExtensionInput): void {
     }
     if (key === "resourceId" && typeof value === "string" && value.trim().length > 0) {
       const resourceId = value.trim();
+      if (!isDoubaoSynthesisResourceId(resourceId)) {
+        input.ignoredFields.push({
+          field: `vendor.extensions.${input.providerId}.${key}`,
+          reason: `Doubao resource '${resourceId}' is not declared as a synthesis resource.`
+        });
+        continue;
+      }
       input.vendorRequest.resourceId = resourceId;
       objectAt(input.vendorRequest, "headers")["X-Api-Resource-Id"] = resourceId;
       input.appliedVendorExtensions.push(vendorApplied(key, resourceId, "headers.X-Api-Resource-Id", extension.schemaVersion));
@@ -821,8 +881,70 @@ async function assertOkResponse(response: Response, label: string): Promise<void
   });
 }
 
+// defaultModelId: 入参为模型 capability 和 operation；输出该 operation 可用的默认模型 id。
 function defaultModelId(models: TTSVendorModel[], operation: TTSOperation): string {
-  return models.find((model) => model.defaultForOperations?.includes(operation))?.modelId ?? DOUBAO_DEFAULT_RESOURCE_ID;
+  return (
+    models.find((model) => model.defaultForOperations?.includes(operation))?.modelId ??
+    models.find((model) => model.canonicalCapabilities.supportedOperations.includes(operation))?.modelId ??
+    DOUBAO_DEFAULT_RESOURCE_ID
+  );
+}
+
+// isDoubaoSynthesisResourceId: 入参为 Resource Id；输出是否为可用于 SSE 合成请求的 Resource Id。
+function isDoubaoSynthesisResourceId(resourceId: string): boolean {
+  return (DOUBAO_SYNTHESIS_RESOURCE_IDS as readonly string[]).includes(resourceId);
+}
+
+// doubaoResourceIdFromCompatibility: 入参为请求音色兼容事实；输出需要写入 X-Api-Resource-Id 的复刻资源。
+function doubaoResourceIdFromCompatibility(compatibility: VoiceCompatibility | undefined): string | undefined {
+  if (compatibility?.scope !== "resource") {
+    return undefined;
+  }
+  return compatibility.vendorField === undefined || compatibility.vendorField === "resourceId"
+    ? compatibility.resourceIds[0]
+    : undefined;
+}
+
+// doubaoVoiceResourceCompatibility: 入参为豆包 Resource Id；输出复刻音色合成时需要强制匹配的资源兼容事实。
+function doubaoVoiceResourceCompatibility(resourceId: string): VoiceCompatibility {
+  return {
+    scope: "resource",
+    enforced: true,
+    resourceIds: [resourceId],
+    resourceKind: "clone_resource",
+    vendorField: "resourceId",
+    compatibleModelIds: doubaoCompatibleTtsModelIds(resourceId),
+    preferredModelIds: doubaoCompatibleTtsModelIds(resourceId),
+    notes: ["豆包复刻音色合成时必须用匹配的 X-Api-Resource-Id；req_params.model 是复刻 2.0 下的表现模型参数。"]
+  };
+}
+
+// doubaoCloneResourceIdFromVoice: 入参为本地 voice 记录；输出可从历史字段或音色 ID 中推导出的 seed-icl 资源。
+function doubaoCloneResourceIdFromVoice(voice: VoiceRecord): string | undefined {
+  const metadataResource =
+    stringValue(voice.vendorMetadata?.resourceId) ??
+    stringValue(voice.vendorMetadata?.cloneModelId) ??
+    stringValue(voice.vendorMetadata?.cloneResourceId);
+  if (metadataResource !== undefined && isDoubaoCloneResourceId(metadataResource)) {
+    return metadataResource;
+  }
+  if (voice.modelId !== undefined && isDoubaoCloneResourceId(voice.modelId)) {
+    return voice.modelId;
+  }
+  const searchable = `${voice.voiceId} ${voice.providerVoiceId} ${voice.displayName}`;
+  return DOUBAO_CLONE_RESOURCE_IDS.find((resourceId) => searchable.includes(resourceId));
+}
+
+// doubaoCompatibleTtsModelIds: 入参为复刻资源；输出平台模型选择上可搭配的 TTS 模型候选。
+function doubaoCompatibleTtsModelIds(resourceId: string): string[] {
+  return resourceId === "seed-icl-1.0" || resourceId === "seed-icl-1.0-concurr"
+    ? ["seed-tts-1.0"]
+    : [DOUBAO_DEFAULT_TTS_RESOURCE_ID];
+}
+
+// isDoubaoCloneResourceId: 入参为 Resource Id；输出是否为 seed-icl 复刻资源。
+function isDoubaoCloneResourceId(resourceId: string): boolean {
+  return (DOUBAO_CLONE_RESOURCE_IDS as readonly string[]).includes(resourceId);
 }
 
 function applied(field: string, value: JsonValue, vendorField: string): AppliedCanonicalField {
@@ -850,7 +972,21 @@ function normalizeProviderVoiceId(voiceId: string | undefined): string | undefin
   if (trimmed.length === 0) {
     return undefined;
   }
-  return trimmed.startsWith(`${DOUBAO_PROVIDER_ID}:`) ? trimmed.slice(`${DOUBAO_PROVIDER_ID}:`.length) : trimmed;
+  const providerStripped = trimmed.startsWith(`${DOUBAO_PROVIDER_ID}:`)
+    ? trimmed.slice(`${DOUBAO_PROVIDER_ID}:`.length)
+    : trimmed;
+  return normalizeDoubaoLegacySpeakerId(providerStripped);
+}
+
+// normalizeDoubaoLegacySpeakerId: 入参为平台历史登记音色 ID；输出豆包 req_params.speaker 需要的真实 speaker id。
+function normalizeDoubaoLegacySpeakerId(voiceId: string): string {
+  for (const resourceId of DOUBAO_SYNTHESIS_RESOURCE_IDS) {
+    const prefix = `${DOUBAO_PROVIDER_ID}_${resourceId}_`;
+    if (voiceId.startsWith(prefix) && voiceId.length > prefix.length) {
+      return voiceId.slice(prefix.length);
+    }
+  }
+  return voiceId;
 }
 
 function normalizeCloneSpeakerId(displayName: string): string {
@@ -946,6 +1082,11 @@ function objectAt(payload: VendorPayload, key: string): VendorPayload {
 
 function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+// stringValue: 入参为未知值；输出非空字符串，供历史 voice metadata 兼容读取。
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 function isVendorPayload(value: unknown): value is VendorPayload {

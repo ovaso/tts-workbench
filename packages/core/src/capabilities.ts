@@ -15,6 +15,59 @@ export type TTSStreamInputMode = "text_once" | "text_incremental";
 
 export type CapabilitySupport = "supported" | "approximated" | "ignored" | "unsupported";
 
+export type VoiceCompatibilityPolicyKind =
+  | "provider_wide"
+  | "same_model"
+  | "same_resource"
+  | "instant_only"
+  | "unknown";
+
+export type VoiceCompatibilityEnforcer = "vendor" | "adapter" | "none";
+
+export interface VoiceCompatibilityPolicy {
+  kind: VoiceCompatibilityPolicyKind;
+  enforcedBy: VoiceCompatibilityEnforcer;
+  resourceKind?: "synthesis_resource" | "clone_resource";
+  notes?: string[];
+}
+
+export type VoiceCompatibility =
+  | {
+      scope: "provider";
+      enforced: false;
+      preferredModelIds?: string[];
+      notes?: string[];
+    }
+  | {
+      scope: "model";
+      enforced: true;
+      modelIds: string[];
+      preferredModelIds?: string[];
+      notes?: string[];
+    }
+  | {
+      scope: "resource";
+      enforced: true;
+      resourceIds: string[];
+      resourceKind: "synthesis_resource" | "clone_resource";
+      vendorField?: string;
+      compatibleModelIds?: string[];
+      preferredModelIds?: string[];
+      notes?: string[];
+    }
+  | {
+      scope: "instant";
+      enforced: true;
+      reusable: false;
+      notes?: string[];
+    }
+  | {
+      scope: "unknown";
+      enforced: false;
+      preferredModelIds?: string[];
+      notes?: string[];
+    };
+
 export type CanonicalControlName =
   | "speed"
   | "pitch"
@@ -40,6 +93,7 @@ export interface VoiceCloneCapability {
   minReferenceAudioSeconds?: number;
   maxReferenceAudioSeconds?: number;
   maxReferenceAudioFiles?: number;
+  resultCompatibility?: VoiceCompatibilityPolicy;
 }
 
 export interface TTSOperationCapability {
@@ -54,6 +108,7 @@ export interface TTSOperationCapability {
   supportsTimestamps?: boolean;
   supportsInterruption?: boolean;
   voiceClone?: VoiceCloneCapability;
+  voiceCompatibilityPolicy?: VoiceCompatibilityPolicy;
   canonicalControls: Partial<Record<CanonicalControlName, CanonicalControlCapability>>;
   vendorExtensionSchema?: VendorExtensionSchema;
   notes?: string[];
@@ -69,6 +124,7 @@ export interface TTSVendorModelCanonicalCapabilities {
   maxTextChars?: number;
   canonicalControls: Partial<Record<CanonicalControlName, CanonicalControlCapability>>;
   voiceClone?: VoiceCloneCapability;
+  voiceCompatibilityPolicy?: VoiceCompatibilityPolicy;
 }
 
 export interface TTSVendorModelDefaultConfiguration {
@@ -92,6 +148,7 @@ export interface TTSVendorModel {
   canonicalCapabilities: TTSVendorModelCanonicalCapabilities;
   defaultConfiguration?: TTSVendorModelDefaultConfiguration;
   vendorModelFeatureSchema?: VendorExtensionSchema;
+  voiceCompatibilityPolicy?: VoiceCompatibilityPolicy;
   notes?: string[];
 }
 
@@ -109,5 +166,6 @@ export interface TTSCapabilities {
   adapterVersion: string;
   vendorFeatures: TTSVendorFeatureFlags;
   vendorModels: TTSVendorModel[];
+  voiceCompatibilityPolicy?: VoiceCompatibilityPolicy;
   operations: Partial<Record<TTSOperation, TTSOperationCapability>>;
 }

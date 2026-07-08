@@ -6,6 +6,17 @@ import { XiaomiMiMoTTSAdapter } from "../adapters/xiaomi-mimo/adapter";
 import { xiaomiMiMoExtensionSchema } from "../adapters/xiaomi-mimo/extension-schema";
 
 describe("XiaomiMiMoTTSAdapter", () => {
+  it("declares instant-only compatibility for the voice clone operation", () => {
+    const adapter = new XiaomiMiMoTTSAdapter();
+    const capabilities = adapter.capabilities();
+    const cloneModel = capabilities.vendorModels.find((candidate) => candidate.modelId === "mimo-v2.5-tts-voiceclone");
+
+    expect(capabilities.voiceCompatibilityPolicy?.kind).toBe("instant_only");
+    expect(cloneModel?.voiceCompatibilityPolicy?.kind).toBe("instant_only");
+    expect(capabilities.operations["voice.clone.instant"]?.voiceClone?.resultCompatibility?.kind).toBe("instant_only");
+    expect(cloneModel?.canonicalCapabilities.supportedOperations).toEqual(["voice.clone.instant"]);
+  });
+
   it("plans sync TTS with Chat Completions messages and vendor style controls", async () => {
     const adapter = new XiaomiMiMoTTSAdapter();
     const plan = await adapter.plan({

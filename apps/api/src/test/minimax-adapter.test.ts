@@ -7,6 +7,20 @@ import {
 import { minimaxExtensionSchema } from "../adapters/minimax/extension-schema";
 
 describe("MiniMaxTTSAdapter", () => {
+  it("declares unknown voice compatibility without enforcing model binding", () => {
+    const adapter = new MiniMaxTTSAdapter();
+    const capabilities = adapter.capabilities();
+    const model = capabilities.vendorModels.find((candidate) => candidate.modelId === "speech-2.8-hd");
+
+    expect(capabilities.voiceCompatibilityPolicy).toMatchObject({
+      kind: "unknown",
+      enforcedBy: "none"
+    });
+    expect(model?.voiceCompatibilityPolicy?.kind).toBe("unknown");
+    expect(capabilities.operations["tts.sync"]?.voiceCompatibilityPolicy?.kind).toBe("unknown");
+    expect(capabilities.operations["voice.clone.create"]?.voiceClone?.resultCompatibility?.kind).toBe("unknown");
+  });
+
   it("plans MiniMax sync TTS with canonical fields, defaults, and vendor extensions", async () => {
     const adapter = new MiniMaxTTSAdapter();
     const plan = await adapter.plan({

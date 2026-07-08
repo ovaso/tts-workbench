@@ -6,13 +6,26 @@ import { DoubaoTTSAdapter } from "../adapters/doubao/adapter";
 import { doubaoExtensionSchema } from "../adapters/doubao/extension-schema";
 
 describe("DoubaoTTSAdapter", () => {
+  it("declares same-resource voice compatibility without making seed-icl ordinary TTS models", () => {
+    const adapter = new DoubaoTTSAdapter();
+    const capabilities = adapter.capabilities();
+    const cloneResource = capabilities.vendorModels.find((candidate) => candidate.modelId === "seed-icl-2.0");
+    const ttsResource = capabilities.vendorModels.find((candidate) => candidate.modelId === "seed-tts-2.0");
+
+    expect(capabilities.voiceCompatibilityPolicy?.kind).toBe("same_resource");
+    expect(capabilities.operations["tts.sync"]?.voiceCompatibilityPolicy?.kind).toBe("same_resource");
+    expect(capabilities.operations["voice.clone.create"]?.voiceClone?.resultCompatibility?.kind).toBe("same_resource");
+    expect(cloneResource?.canonicalCapabilities.supportedOperations).toEqual(["voice.clone.create"]);
+    expect(ttsResource?.canonicalCapabilities.supportedOperations).toEqual(["tts.sync", "tts.stream"]);
+  });
+
   it("plans Doubao SSE TTS with canonical fields and vendor additions", async () => {
     const adapter = new DoubaoTTSAdapter();
     const plan = await adapter.plan({
       operation: "tts.sync",
       providerId: "doubao",
       text: "家长您好",
-      model: "seed-icl-2.0",
+      model: "seed-tts-2.0",
       voice: {
         providerVoiceId: "doubao:custom_zh_parent"
       },
@@ -51,7 +64,7 @@ describe("DoubaoTTSAdapter", () => {
 
     expect(plan.operation).toBe("tts.sync");
     expect(plan.vendorRequest).toMatchObject({
-      resourceId: "seed-icl-2.0",
+      resourceId: "seed-tts-2.0",
       body: {
         user: {
           uid: "unit-test"
@@ -168,7 +181,7 @@ describe("DoubaoTTSAdapter", () => {
     expect(fetchCalls[0]?.headers).toMatchObject({
       "content-type": "application/json",
       "x-api-key": "test-key",
-      "x-api-resource-id": "seed-icl-2.0",
+      "x-api-resource-id": "seed-tts-2.0",
       "x-control-require-usage-tokens-return": "text_words"
     });
     expect([...result.audio.data]).toEqual([1, 2, 3, 4]);
@@ -204,7 +217,7 @@ describe("DoubaoTTSAdapter", () => {
     });
 
     expect(plan.vendorRequest).toMatchObject({
-      resourceId: "seed-icl-2.0",
+      resourceId: "seed-tts-2.0",
       body: {
         user: {
           uid: "tts_workbench"
@@ -220,6 +233,127 @@ describe("DoubaoTTSAdapter", () => {
       "vendor.extensions.doubao.resourceId",
       "vendor.extensions.doubao.ttsModel"
     ]);
+  });
+
+  it("keeps voice clone resource ids out of TTS synthesis models", async () => {
+    const adapter = new DoubaoTTSAdapter();
+
+    expect(
+      adapter.capabilities().vendorModels.find((model) => model.modelId === "seed-icl-2.0")?.canonicalCapabilities
+        .supportedOperations
+    ).toEqual(["voice.clone.create"]);
+    await expect(
+      adapter.plan({
+        operation: "tts.sync",
+        providerId: "doubao",
+        text: "cloned speaker",
+        model: "seed-icl-2.0",
+        voice: {
+          providerVoiceId: "custom_zh_parent"
+        }
+      })
+    ).rejects.toThrow("Doubao model 'seed-icl-2.0' does not support 'tts.sync'.");
+  });
+
+  it("applies voice compatibility resource ids for cloned-speaker synthesis", async () => {
+    const adapter = new DoubaoTTSAdapter();
+    const plan = await adapter.plan({
+      operation: "tts.sync",
+      providerId: "doubao",
+      text: "compatible cloned speaker",
+      model: "seed-tts-2.0",
+      voice: {
+        providerVoiceId: "custom_zh_parent",
+        compatibility: {
+          scope: "resource",
+          enforced: true,
+          resourceIds: ["seed-icl-2.0"],
+          resourceKind: "clone_resource",
+          vendorField: "resourceId",
+          compatibleModelIds: ["seed-tts-2.0"]
+        }
+      }
+    });
+
+    expect(plan.vendorRequest).toMatchObject({
+      resourceId: "seed-icl-2.0"
+    });
+    expect(plan.mappingReport.appliedCanonicalFields).toEqual(
+      expect.arrayContaining([
+        {
+          field: "voice.compatibility.resourceIds[0]",
+          value: "seed-icl-2.0",
+          vendorField: "headers.X-Api-Resource-Id"
+        }
+      ])
+    );
+  });
+
+  it("normalizes legacy Doubao managed voice ids before sending speaker", async () => {
+    const adapter = new DoubaoTTSAdapter();
+    const plan = await adapter.plan({
+      operation: "tts.stream",
+      providerId: "doubao",
+      text: "legacy managed speaker",
+      model: "seed-tts-2.0",
+      voice: {
+        providerVoiceId: "doubao_seed-icl-2.0_S_D3lMr9g32",
+        compatibility: {
+          scope: "resource",
+          enforced: true,
+          resourceIds: ["seed-icl-2.0"],
+          resourceKind: "clone_resource",
+          vendorField: "resourceId",
+          compatibleModelIds: ["seed-tts-2.0"]
+        }
+      }
+    });
+
+    expect(plan.vendorRequest).toMatchObject({
+      resourceId: "seed-icl-2.0",
+      body: {
+        req_params: {
+          speaker: "S_D3lMr9g32"
+        }
+      }
+    });
+    expect(plan.mappingReport.appliedCanonicalFields).toEqual(
+      expect.arrayContaining([
+        {
+          field: "voice",
+          value: "S_D3lMr9g32",
+          vendorField: "req_params.speaker"
+        }
+      ])
+    );
+  });
+
+  it("allows explicit TTS vendor resource overrides that point at voice clone resources", async () => {
+    const adapter = new DoubaoTTSAdapter();
+    const plan = await adapter.plan({
+      operation: "tts.sync",
+      providerId: "doubao",
+      text: "bad extension resource",
+      voice: {
+        providerVoiceId: "custom_zh_parent"
+      },
+      vendor: {
+        mode: "prefer_vendor",
+        extensions: {
+          doubao: {
+            schemaVersion: "1.0.0",
+            params: {
+              resourceId: "seed-icl-2.0"
+            }
+          }
+        }
+      }
+    });
+
+    expect(plan.vendorRequest).toMatchObject({
+      resourceId: "seed-icl-2.0"
+    });
+    expect(plan.mappingReport.appliedVendorExtensions.map((field) => field.path)).toContain("resourceId");
   });
 
   it("surfaces Doubao SSE error code and message", async () => {
@@ -392,8 +526,22 @@ describe("DoubaoTTSAdapter", () => {
       providerVoiceId: "custom_parent_voice",
       displayName: "Parent Voice",
       source: "cloned",
-      modelId: "seed-icl-2.0"
+      createdWithModelId: "seed-icl-2.0",
+      preferredModelId: "seed-tts-2.0",
+      compatibility: {
+        scope: "resource",
+        enforced: true,
+        resourceIds: ["seed-icl-2.0"],
+        resourceKind: "clone_resource",
+        vendorField: "resourceId",
+        compatibleModelIds: ["seed-tts-2.0"],
+        preferredModelIds: ["seed-tts-2.0"]
+      },
+      vendorMetadata: {
+        cloneModelId: "seed-icl-2.0"
+      }
     });
+    expect(result.voice.modelId).toBeUndefined();
   });
 
   it("exposes Doubao vendor extension schemas", () => {

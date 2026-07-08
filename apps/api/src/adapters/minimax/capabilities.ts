@@ -1,4 +1,4 @@
-import type { TTSCapabilities, TTSVendorModel } from "@tts-platform/core";
+import type { TTSCapabilities, TTSVendorModel, VoiceCompatibilityPolicy } from "@tts-platform/core";
 import { minimaxSyncExtensionSchema, minimaxExtensionSchema } from "./extension-schema";
 
 export const MINIMAX_PROVIDER_ID = "minimax";
@@ -20,6 +20,13 @@ const speechModels = [
 const outputFormats = ["mp3", "wav", "flac"] as const;
 const streamFormats = ["mp3"] as const;
 const sampleRatesHz = [16000, 24000, 32000, 44100] as const;
+
+// minimaxUnknownCompatibilityPolicy: MiniMax 文档未确认复刻音色强绑定，能力层只表达未知且不阻断。
+const minimaxUnknownCompatibilityPolicy: VoiceCompatibilityPolicy = {
+  kind: "unknown",
+  enforcedBy: "none",
+  notes: ["MiniMax 文档未确认复刻 voice_id 与创建模型强绑定；本仓库只把 modelId 作为推荐模型。"]
+};
 
 // minimaxSpeechModel: 入参为 MiniMax modelId 和展示名；输出该模型的 canonical 能力与厂商模型扩展 schema。
 function minimaxSpeechModel(modelId: (typeof speechModels)[number], displayName = modelId): TTSVendorModel {
@@ -83,9 +90,12 @@ function minimaxSpeechModel(modelId: (typeof speechModels)[number], displayName 
         supportedAudioFormats: ["mp3", "m4a", "wav"],
         minReferenceAudioSeconds: 10,
         maxReferenceAudioSeconds: 300,
-        maxReferenceAudioFiles: 1
-      }
+        maxReferenceAudioFiles: 1,
+        resultCompatibility: minimaxUnknownCompatibilityPolicy
+      },
+      voiceCompatibilityPolicy: minimaxUnknownCompatibilityPolicy
     },
+    voiceCompatibilityPolicy: minimaxUnknownCompatibilityPolicy,
     defaultConfiguration: {
       voice: {
         providerVoiceId: MINIMAX_DEFAULT_VOICE_ID
@@ -112,6 +122,7 @@ export function minimaxCapabilities(adapterVersion = MINIMAX_ADAPTER_VERSION): T
     providerId: MINIMAX_PROVIDER_ID,
     providerName: "MiniMax",
     adapterVersion,
+    voiceCompatibilityPolicy: minimaxUnknownCompatibilityPolicy,
     vendorFeatures: {
       supportsHttpTTS: true,
       supportsStreamingTTS: true,
@@ -128,6 +139,7 @@ export function minimaxCapabilities(adapterVersion = MINIMAX_ADAPTER_VERSION): T
         outputFormats: [...outputFormats],
         sampleRatesHz: [...sampleRatesHz],
         maxTextChars: 10000,
+        voiceCompatibilityPolicy: minimaxUnknownCompatibilityPolicy,
         canonicalControls: minimaxSpeechModel("speech-2.8-hd").canonicalCapabilities.canonicalControls,
         vendorExtensionSchema: minimaxExtensionSchema("tts.sync")
       },
@@ -142,6 +154,7 @@ export function minimaxCapabilities(adapterVersion = MINIMAX_ADAPTER_VERSION): T
         maxTextChars: 10000,
         supportsTimestamps: true,
         supportsInterruption: false,
+        voiceCompatibilityPolicy: minimaxUnknownCompatibilityPolicy,
         canonicalControls: minimaxSpeechModel("speech-2.8-hd").canonicalCapabilities.canonicalControls,
         vendorExtensionSchema: minimaxExtensionSchema("tts.stream")
       },
@@ -155,7 +168,8 @@ export function minimaxCapabilities(adapterVersion = MINIMAX_ADAPTER_VERSION): T
           supportedAudioFormats: ["mp3", "m4a", "wav"],
           minReferenceAudioSeconds: 10,
           maxReferenceAudioSeconds: 300,
-          maxReferenceAudioFiles: 1
+          maxReferenceAudioFiles: 1,
+          resultCompatibility: minimaxUnknownCompatibilityPolicy
         },
         canonicalControls: {},
         vendorExtensionSchema: minimaxExtensionSchema("voice.clone.create")

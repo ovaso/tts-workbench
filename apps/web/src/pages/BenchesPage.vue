@@ -172,16 +172,18 @@
                     v-model="outputFormat"
                     :items="formatItems"
                     label="输出格式"
+                    :disabled="formatItems.length === 0"
                     prepend-inner-icon="mdi-file-music-outline"
                     variant="outlined"
                   />
                 </v-col>
                 <v-col cols="12" md="6">
-                  <v-text-field
+                  <v-select
                     v-model.number="sampleRateHz"
+                    :items="sampleRateItems"
                     label="采样率"
+                    :disabled="sampleRateItems.length === 0"
                     prepend-inner-icon="mdi-sine-wave"
-                    type="number"
                     variant="outlined"
                   />
                 </v-col>
@@ -190,17 +192,41 @@
             <div>
               <v-row>
                 <v-col cols="12" md="4">
-                  <v-text-field v-model.number="speed" label="Speed" type="number" variant="outlined" />
+                  <v-text-field
+                    v-model.number="speed"
+                    label="Speed"
+                    :disabled="!supportsSpeed"
+                    :max="speedBounds.max"
+                    :min="speedBounds.min"
+                    type="number"
+                    variant="outlined"
+                  />
                 </v-col>
                 <v-col cols="12" md="4">
-                  <v-text-field v-model.number="pitch" label="Pitch" type="number" variant="outlined" />
+                  <v-text-field
+                    v-model.number="pitch"
+                    label="Pitch"
+                    :disabled="!supportsPitch"
+                    :max="pitchBounds.max"
+                    :min="pitchBounds.min"
+                    type="number"
+                    variant="outlined"
+                  />
                 </v-col>
                 <v-col cols="12" md="4">
-                  <v-text-field v-model.number="volume" label="Volume" type="number" variant="outlined" />
+                  <v-text-field
+                    v-model.number="volume"
+                    label="Volume"
+                    :disabled="!supportsVolume"
+                    :max="volumeBounds.max"
+                    :min="volumeBounds.min"
+                    type="number"
+                    variant="outlined"
+                  />
                 </v-col>
               </v-row>
-              <v-text-field v-model="emotion" label="Emotion" variant="outlined" />
-              <v-text-field v-model="style" label="Style" variant="outlined" />
+              <v-text-field v-model="emotion" label="Emotion" :disabled="!supportsEmotion" variant="outlined" />
+              <v-text-field v-model="style" label="Style" :disabled="!supportsStyle" variant="outlined" />
               <VendorExtensionEditor v-model="vendorExtensionJson" />
             </div>
           </div>
@@ -224,7 +250,7 @@
 </template>
 
 <script setup lang="ts">
-import type { BenchConfig, BenchConfigCreateRequest, TTSOutputFormat, VendorPayload } from "@tts-platform/core";
+import type { BenchConfig, BenchConfigCreateRequest, TTSOutputFormat, VendorPayload, VoiceRecord } from "@tts-platform/core";
 import { computed, onMounted, ref, watch } from "vue";
 import { createBenchConfig, listBenchConfigs } from "../api/bench-configs";
 import { listVoices } from "../api/voices";
@@ -233,7 +259,19 @@ import ProviderSelector from "../components/ProviderSelector.vue";
 import VendorExtensionEditor from "../components/VendorExtensionEditor.vue";
 import { useProvidersStore } from "../stores/providers";
 import { formatLocalDateTime } from "../utils/time";
-import { modelOptions } from "./synthesize-options";
+import {
+  defaultFormatForModel,
+  defaultModelForOperation,
+  defaultSampleRateForModel,
+  formatOptionsForModel,
+  modelById,
+  modelOptions,
+  numericControlBounds,
+  sampleRateOptionsForModel,
+  supportsCanonicalControl,
+  vendorExtensionTemplateForOperation,
+  voiceOptions
+} from "./synthesize-options";
 import { type ComboboxOption, voiceInputValue } from "./synthesize-submit";
 import {
   benchConfigOutputLabel,
@@ -266,6 +304,7 @@ const emotion = ref("");
 const style = ref("");
 const vendorExtensionJson = ref("{}");
 const knownVoiceIds = ref(new Set<string>());
+const managedVoices = ref<VoiceRecord[]>([]);
 const configHeaders = [
   { title: "配置", key: "displayName", sortable: true },
   { title: "厂商", key: "providerId", sortable: true },
@@ -274,15 +313,31 @@ const configHeaders = [
   { title: "输出", key: "output", sortable: false },
   { title: "创建时间", key: "createdAt", sortable: true }
 ];
-const formatItems: TTSOutputFormat[] = ["mp3", "wav", "flac", "ogg", "opus", "pcm"];
 const currentCapabilities = computed(() => store.capabilities[providerId.value]);
-const modelItems = computed(() => modelOptions(currentCapabilities.value));
+const currentModel = computed(() => modelById(currentCapabilities.value, modelId.value, "tts.sync"));
+const selectedManagedVoice = computed(() => {
+  const selectedVoiceId = voiceInputValue(voiceInput.value);
+  return managedVoices.value.find((voice) => voice.voiceId === selectedVoiceId);
+});
+const modelItems = computed(() => modelOptions(currentCapabilities.value, "tts.sync", selectedManagedVoice.value));
+const formatItems = computed(() => formatOptionsForModel(currentModel.value, currentCapabilities.value, "tts.sync"));
+const sampleRateItems = computed(() => sampleRateOptionsForModel(currentModel.value, currentCapabilities.value, "tts.sync"));
+const supportsSpeed = computed(() => supportsCanonicalControl(currentModel.value, currentCapabilities.value, "tts.sync", "speed"));
+const supportsPitch = computed(() => supportsCanonicalControl(currentModel.value, currentCapabilities.value, "tts.sync", "pitch"));
+const supportsVolume = computed(() => supportsCanonicalControl(currentModel.value, currentCapabilities.value, "tts.sync", "volume"));
+const supportsEmotion = computed(() => supportsCanonicalControl(currentModel.value, currentCapabilities.value, "tts.sync", "emotion"));
+const supportsStyle = computed(() => supportsCanonicalControl(currentModel.value, currentCapabilities.value, "tts.sync", "style"));
+const speedBounds = computed(() => numericControlBounds(currentModel.value, currentCapabilities.value, "tts.sync", "speed"));
+const pitchBounds = computed(() => numericControlBounds(currentModel.value, currentCapabilities.value, "tts.sync", "pitch"));
+const volumeBounds = computed(() => numericControlBounds(currentModel.value, currentCapabilities.value, "tts.sync", "volume"));
 const canCreateConfig = computed(() => {
   return (
     providerId.value.length > 0 &&
-    modelId.value.length > 0 &&
+    currentModel.value !== undefined &&
     configDisplayName.value.trim().length > 0 &&
-    voiceInputValue(voiceInput.value).length > 0
+    voiceInputValue(voiceInput.value).length > 0 &&
+    formatItems.value.includes(outputFormat.value) &&
+    sampleRateItems.value.includes(sampleRateHz.value)
   );
 });
 
@@ -305,10 +360,9 @@ watch(
       return;
     }
     try {
+      voiceInput.value = "";
       const capabilities = await store.loadCapabilities(nextProviderId);
-      if (modelId.value.length === 0) {
-        modelId.value = capabilities.vendorModels[0]?.modelId ?? "";
-      }
+      applyProviderDefaults(capabilities);
       await loadVoiceOptions(nextProviderId);
     } catch (caught) {
       error.value = caught instanceof Error ? caught.message : "加载厂商能力失败。";
@@ -319,6 +373,15 @@ watch(
   }
 );
 
+watch(modelId, () => {
+  applyModelDefaults();
+  applyVendorExtensionTemplate();
+});
+
+watch(voiceInput, () => {
+  applyVoiceCompatibilityDefaults();
+});
+
 // openConfigDialog: 无入参；功能是打开添加 Benchmark 配置弹窗并初始化默认名称。
 function openConfigDialog() {
   success.value = "";
@@ -327,6 +390,56 @@ function openConfigDialog() {
     configDisplayName.value = "Benchmark 配置";
   }
   configDialog.value = true;
+}
+
+// applyProviderDefaults: 入参为 provider capability；功能是按 TTS 合成能力选择 Benchmark 默认模型。
+function applyProviderDefaults(capabilities: typeof currentCapabilities.value) {
+  modelId.value = defaultModelForOperation(capabilities, "tts.sync", selectedManagedVoice.value);
+  applyModelDefaults();
+  applyVendorExtensionTemplate();
+}
+
+// applyVoiceCompatibilityDefaults: 无入参；功能是选择有强兼容约束的音色后，把配置模型切到允许范围内。
+function applyVoiceCompatibilityDefaults() {
+  const availableModelIds = modelItems.value.map((item) => item.value);
+  if (availableModelIds.length > 0 && !availableModelIds.includes(modelId.value)) {
+    modelId.value = defaultModelForOperation(currentCapabilities.value, "tts.sync", selectedManagedVoice.value);
+  }
+}
+
+// applyModelDefaults: 无入参；功能是按当前模型 capability 刷新输出参数并清理不支持的控制项。
+function applyModelDefaults() {
+  if (currentModel.value === undefined) {
+    return;
+  }
+  const nextFormat = defaultFormatForModel(currentModel.value, currentCapabilities.value, "tts.sync");
+  if (nextFormat !== undefined) {
+    outputFormat.value = nextFormat;
+  }
+  const nextSampleRate = defaultSampleRateForModel(currentModel.value, currentCapabilities.value, "tts.sync");
+  if (nextSampleRate !== undefined) {
+    sampleRateHz.value = nextSampleRate;
+  }
+  if (!supportsSpeed.value) {
+    speed.value = undefined;
+  }
+  if (!supportsPitch.value) {
+    pitch.value = undefined;
+  }
+  if (!supportsVolume.value) {
+    volume.value = undefined;
+  }
+  if (!supportsEmotion.value) {
+    emotion.value = "";
+  }
+  if (!supportsStyle.value) {
+    style.value = "";
+  }
+}
+
+// applyVendorExtensionTemplate: 无入参；功能是按当前厂商和模型刷新 Benchmark 配置的厂商参数模板。
+function applyVendorExtensionTemplate() {
+  vendorExtensionJson.value = vendorExtensionTemplateForOperation(currentCapabilities.value, "tts.sync", currentModel.value);
 }
 
 // loadConfigs: 无入参；功能是刷新 Benchmark 配置列表。
@@ -407,32 +520,32 @@ function buildOutput(): NonNullable<BenchConfigCreateRequest["output"]> {
 // buildControls: 无入参；功能是收集非空通用控制参数。
 function buildControls(): BenchConfigCreateRequest["controls"] | undefined {
   const controls: NonNullable<BenchConfigCreateRequest["controls"]> = {};
-  if (speed.value !== undefined && Number.isFinite(speed.value)) {
+  if (supportsSpeed.value && speed.value !== undefined && Number.isFinite(speed.value)) {
     controls.speed = speed.value;
   }
-  if (pitch.value !== undefined && Number.isFinite(pitch.value)) {
+  if (supportsPitch.value && pitch.value !== undefined && Number.isFinite(pitch.value)) {
     controls.pitch = pitch.value;
   }
-  if (volume.value !== undefined && Number.isFinite(volume.value)) {
+  if (supportsVolume.value && volume.value !== undefined && Number.isFinite(volume.value)) {
     controls.volume = volume.value;
   }
-  if (emotion.value.trim().length > 0) {
+  if (supportsEmotion.value && emotion.value.trim().length > 0) {
     controls.emotion = emotion.value.trim();
   }
-  if (style.value.trim().length > 0) {
+  if (supportsStyle.value && style.value.trim().length > 0) {
     controls.style = style.value.trim();
   }
   return Object.keys(controls).length === 0 ? undefined : controls;
 }
 
-// loadVoiceOptions: 入参为 providerId；功能是加载本地音色 registry 并生成配置弹窗音色选项。
+// loadVoiceOptions: 入参为 providerId；功能是加载当前厂商本地音色 registry 并生成配置弹窗音色选项。
 async function loadVoiceOptions(nextProviderId: string) {
-  const voices = await listVoices({ providerId: nextProviderId });
+  const voices = await listVoices({
+    providerId: nextProviderId
+  });
+  managedVoices.value = voices;
   knownVoiceIds.value = new Set(voices.map((voice) => voice.voiceId));
-  voiceItems.value = voices.map((voice) => ({
-    title: `${voice.displayName} (${voice.providerVoiceId})`,
-    value: voice.voiceId
-  }));
+  voiceItems.value = voiceOptions(voices);
 }
 
 // parseVendorParams: 无入参；功能是解析配置中的 vendor extension JSON。

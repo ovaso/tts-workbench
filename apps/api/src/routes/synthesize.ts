@@ -6,6 +6,7 @@ import {
   type TTSStreamRequest,
   type VoiceCloneInstantRequest,
   type VoiceCloneRequest,
+  type VoiceCompatibility,
   type VoiceCreateRequest,
   type VendorPayload,
   type VendorDirective
@@ -418,6 +419,15 @@ function parseVoiceCreateRequest(body: unknown): VoiceCreateRequest {
   };
   if (typeof input.modelId === "string" && input.modelId.trim().length > 0) {
     request.modelId = input.modelId.trim();
+  }
+  if (typeof input.createdWithModelId === "string" && input.createdWithModelId.trim().length > 0) {
+    request.createdWithModelId = input.createdWithModelId.trim();
+  }
+  if (typeof input.preferredModelId === "string" && input.preferredModelId.trim().length > 0) {
+    request.preferredModelId = input.preferredModelId.trim();
+  }
+  if (input.compatibility !== undefined) {
+    request.compatibility = requireObject(input.compatibility, "compatibility") as VoiceCompatibility;
   }
   if (typeof input.language === "string" && input.language.trim().length > 0) {
     request.language = input.language.trim();

@@ -1,7 +1,7 @@
 {
   "providerId": "doubao",
   "text": "家长您好，我们这边可以先给孩子安排一节免费的试听课。",
-  "model": "seed-icl-2.0",
+  "model": "seed-tts-2.0",
   "voice": {
     "providerVoiceId": "custom_zh_parent"
   },
@@ -19,6 +19,7 @@
       "doubao": {
         "schemaVersion": "1.0.0",
         "params": {
+          "resourceId": "seed-icl-2.0",
           "ttsModel": "seed-tts-2.0-standard",
           "requireUsageTokens": true
         }

@@ -410,7 +410,104 @@ describe("api app", () => {
     expect(listResponse.json().configs).toHaveLength(1);
   });
 
-  it("resolves local voice ids before planning synthesis", async () => {
+  it("creates corpus, config sets, and a planned benchmark plan", async () => {
+    const corpusResponse = await app.inject({
+      method: "POST",
+      url: "/v1/corpus-items",
+      payload: {
+        title: "Greeting",
+        text: "hello benchmark",
+        language: "en-US",
+        scene: "support",
+        emotion: "neutral",
+        styleTags: ["formal"],
+        ssml: "<speak>hello benchmark</speak>"
+      }
+    });
+    expect(corpusResponse.statusCode).toBe(201);
+
+    const corpusSetResponse = await app.inject({
+      method: "POST",
+      url: "/v1/corpus-sets",
+      payload: {
+        name: "Smoke corpus",
+        corpusItemIds: [corpusResponse.json().item.corpusItemId]
+      }
+    });
+    expect(corpusSetResponse.statusCode).toBe(201);
+
+    const configResponse = await app.inject({
+      method: "POST",
+      url: "/v1/bench-configs",
+      payload: {
+        displayName: "Mock baseline",
+        providerId: "mock",
+        modelId: "mock-model",
+        voice: {
+          providerVoiceId: "mock-voice"
+        },
+        output: {
+          format: "wav",
+          sampleRateHz: 24000
+        },
+        controls: {
+          speed: 1
+        }
+      }
+    });
+    expect(configResponse.statusCode).toBe(201);
+
+    const configSetResponse = await app.inject({
+      method: "POST",
+      url: "/v1/bench-config-sets",
+      payload: {
+        name: "Baseline configs",
+        configIds: [configResponse.json().config.configId]
+      }
+    });
+    expect(configSetResponse.statusCode).toBe(201);
+
+    const planResponse = await app.inject({
+      method: "POST",
+      url: "/v1/benchmark-plans",
+      payload: {
+        displayName: "Smoke benchmark",
+        corpusSetId: corpusSetResponse.json().set.corpusSetId,
+        configSetId: configSetResponse.json().set.configSetId,
+        textMode: "ssml"
+      }
+    });
+    expect(planResponse.statusCode).toBe(201);
+    expect(planResponse.json().plan).toMatchObject({
+      displayName: "Smoke benchmark",
+      operation: "tts.sync",
+      textMode: "ssml",
+      status: "planned",
+      summary: {
+        corpusItemCount: 1,
+        configCount: 1,
+        totalJobs: 1
+      }
+    });
+    expect(planResponse.json().plan.jobs[0].request).toMatchObject({
+      providerId: "mock",
+      text: "hello benchmark",
+      ssml: "<speak>hello benchmark</speak>",
+      model: "mock-model",
+      voice: {
+        providerVoiceId: "mock-voice"
+      }
+    });
+
+    const detailResponse = await app.inject({
+      method: "GET",
+      url: `/v1/benchmark-plans/${planResponse.json().plan.planId}`
+    });
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json().planId).toBe(planResponse.json().plan.planId);
+  });
+
+  it("resolves local voice ids without changing the requested synthesis model", async () => {
     const dataRoot = await mkdtemp(path.join(os.tmpdir(), "tts-api-voices-"));
     await mkdir(path.join(dataRoot, "voices"), { recursive: true });
     await writeFile(
@@ -424,10 +521,14 @@ describe("api app", () => {
               providerVoiceId: "mock-cloned-provider-voice",
               displayName: "Mock Clone",
               source: "cloned",
+              modelId: "wrong-model",
               createdAt: "2026-07-03T00:00:00.000Z",
               sourceOperation: "voice.clone.create",
               clone: {
                 createdAt: "2026-07-03T00:00:00.000Z"
+              },
+              vendorMetadata: {
+                cloneResourceId: "mock-tts-v1"
               }
             }
           ]
@@ -448,6 +549,7 @@ describe("api app", () => {
         payload: {
           providerId: "mock",
           text: "hello cloned voice",
+          model: "mock-tts-v1",
           voice: {
             voiceId: "mock:cloned_voice"
           }
@@ -460,6 +562,65 @@ describe("api app", () => {
         url: `/v1/runs/${response.json().runId}`
       });
       expect(detail.json().vendorRequest.voice).toBe("mock-cloned-provider-voice");
+      expect(detail.json().vendorRequest.model).toBe("mock-tts-v1");
+    } finally {
+      await voiceApp.close();
+    }
+  });
+
+  it("rejects local voice synthesis when adapter voice compatibility mismatches the requested model", async () => {
+    const dataRoot = await mkdtemp(path.join(os.tmpdir(), "tts-api-voice-compat-"));
+    await mkdir(path.join(dataRoot, "voices"), { recursive: true });
+    await writeFile(
+      path.join(dataRoot, "voices", "voices.json"),
+      `${JSON.stringify(
+        {
+          voices: [
+            {
+              voiceId: "cosyvoice:flash_voice",
+              providerId: "cosyvoice",
+              providerVoiceId: "flash_voice",
+              displayName: "Flash Voice",
+              source: "external",
+              modelId: "cosyvoice-v3.5-flash",
+              createdAt: "2026-07-08T00:00:00.000Z"
+            }
+          ]
+        },
+        null,
+        2
+      )}\n`
+    );
+    const voiceApp = await buildApp({
+      dataRoot,
+      loadEnv: false
+    });
+
+    try {
+      const listResponse = await voiceApp.inject({
+        method: "GET",
+        url: "/v1/voices?providerId=cosyvoice"
+      });
+      expect(listResponse.json().voices[0].compatibility).toMatchObject({
+        scope: "model",
+        modelIds: ["cosyvoice-v3.5-flash"]
+      });
+
+      const response = await voiceApp.inject({
+        method: "POST",
+        url: "/v1/tts/stream",
+        payload: {
+          providerId: "cosyvoice",
+          text: "hello",
+          model: "cosyvoice-v3.5-plus",
+          voice: {
+            voiceId: "cosyvoice:flash_voice"
+          }
+        }
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.message).toContain("cosyvoice-v3.5-flash");
     } finally {
       await voiceApp.close();
     }

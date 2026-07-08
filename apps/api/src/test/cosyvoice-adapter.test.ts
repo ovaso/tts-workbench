@@ -7,6 +7,17 @@ import {
 import { cosyVoiceExtensionSchema } from "../adapters/cosyvoice/extension-schema";
 
 describe("CosyVoiceTTSAdapter", () => {
+  it("declares same-model voice compatibility at provider, model, and operation levels", () => {
+    const adapter = new CosyVoiceTTSAdapter();
+    const capabilities = adapter.capabilities();
+    const model = capabilities.vendorModels.find((candidate) => candidate.modelId === "cosyvoice-v3.5-plus");
+
+    expect(capabilities.voiceCompatibilityPolicy?.kind).toBe("same_model");
+    expect(model?.voiceCompatibilityPolicy?.kind).toBe("same_model");
+    expect(capabilities.operations["tts.sync"]?.voiceCompatibilityPolicy?.kind).toBe("same_model");
+    expect(capabilities.operations["voice.clone.create"]?.voiceClone?.resultCompatibility?.kind).toBe("same_model");
+  });
+
   it("plans CosyVoice sync TTS with canonical fields and vendor instruction", async () => {
     const adapter = new CosyVoiceTTSAdapter();
     const plan = await adapter.plan({
@@ -81,6 +92,26 @@ describe("CosyVoiceTTSAdapter", () => {
         }
       ])
     );
+  });
+
+  it("rejects CosyVoice voice compatibility model mismatches before vendor execution", async () => {
+    const adapter = new CosyVoiceTTSAdapter();
+    await expect(
+      adapter.plan({
+        operation: "tts.stream",
+        providerId: "cosyvoice",
+        text: "hello",
+        model: "cosyvoice-v3.5-plus",
+        voice: {
+          providerVoiceId: "flash_voice",
+          compatibility: {
+            scope: "model",
+            enforced: true,
+            modelIds: ["cosyvoice-v3.5-flash"]
+          }
+        }
+      })
+    ).rejects.toThrow("CosyVoice voice is only compatible with model(s): cosyvoice-v3.5-flash.");
   });
 
   it("requires an explicit voice id because CosyVoice v3.5 has no default system voice", async () => {
@@ -242,7 +273,15 @@ describe("CosyVoiceTTSAdapter", () => {
       providerVoiceId: "voice_created",
       displayName: "Customer Service Voice",
       source: "cloned",
-      modelId: "cosyvoice-v3.5-plus"
+      modelId: "cosyvoice-v3.5-plus",
+      createdWithModelId: "cosyvoice-v3.5-plus",
+      preferredModelId: "cosyvoice-v3.5-plus",
+      compatibility: {
+        scope: "model",
+        enforced: true,
+        modelIds: ["cosyvoice-v3.5-plus"],
+        preferredModelIds: ["cosyvoice-v3.5-plus"]
+      }
     });
   });
 

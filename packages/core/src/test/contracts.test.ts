@@ -2,13 +2,18 @@ import { describe, expect, it } from "vitest";
 import {
   TTS_OPERATIONS,
   isTTSOperation,
+  type BenchmarkPlan,
+  type BenchConfigSet,
+  type CorpusItem,
   type TTSAdapter,
   type TTSStreamEvent,
   type VoiceCloneInstantPlan,
   type VoiceClonePlan,
   type TTSSyncRequest,
   type TTSStreamRequest,
-  type VendorDirective
+  type VendorDirective,
+  type VoiceRecord,
+  type TTSCapabilities
 } from "../index";
 
 describe("core contracts", () => {
@@ -52,6 +57,72 @@ describe("core contracts", () => {
     };
 
     expect(request.vendor?.extensions?.mock?.params.toneHz).toBe(440);
+  });
+
+  it("models corpus items, config sets, and planned benchmark jobs without execution state", () => {
+    const item: CorpusItem = {
+      corpusItemId: "corpus_item_1",
+      title: "客服问候",
+      text: "您好，请问有什么可以帮您？",
+      language: "zh-CN",
+      scene: "customer_service",
+      emotion: "neutral",
+      lengthCategory: "short",
+      styleTags: ["formal"],
+      ssml: "<speak>您好，请问有什么可以帮您？</speak>",
+      ssmlEnabled: true,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString()
+    };
+    const configSet: BenchConfigSet = {
+      configSetId: "bench_config_set_1",
+      digest: "digest",
+      name: "baseline",
+      configIds: ["config_1"],
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt
+    };
+    const plan: BenchmarkPlan = {
+      planId: "plan_1",
+      displayName: "baseline plan",
+      corpusSetId: "corpus_set_1",
+      configSetId: configSet.configSetId,
+      operation: "tts.sync",
+      textMode: "ssml",
+      status: "planned",
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+      jobs: [
+        {
+          jobId: "job_0001",
+          corpusItemId: item.corpusItemId,
+          configId: "config_1",
+          operation: "tts.sync",
+          textMode: "ssml",
+          status: "planned",
+          request: {
+            operation: "tts.sync",
+            providerId: "mock",
+            text: item.text,
+            ssml: "<speak>您好，请问有什么可以帮您？</speak>",
+            voice: {}
+          }
+        }
+      ],
+      summary: {
+        corpusItemCount: 1,
+        configCount: 1,
+        totalJobs: 1
+      },
+      archive: {
+        runPath: "data/benchmark-runs/plan_1",
+        files: ["benchmark-plan.json"]
+      }
+    };
+
+    expect(plan.jobs[0]?.request.operation).toBe("tts.sync");
+    expect(plan.jobs[0]?.request.ssml).toContain("speak");
+    expect(plan.summary.totalJobs).toBe(1);
   });
 
   it("requires adapters to declare vendor-owned feature flags", () => {
@@ -182,6 +253,46 @@ describe("core contracts", () => {
 
     expect(plan.canonicalRequest.referenceAudio[0]?.format).toBe("m4a");
     expect(plan.canonicalRequest.consent?.confirmed).toBe(true);
+  });
+
+  it("models voice compatibility separately from legacy modelId", () => {
+    const voice: VoiceRecord = {
+      voiceId: "cosyvoice:voice_flash",
+      providerId: "cosyvoice",
+      providerVoiceId: "voice_flash",
+      displayName: "Flash voice",
+      source: "cloned",
+      modelId: "cosyvoice-v3.5-flash",
+      createdWithModelId: "cosyvoice-v3.5-flash",
+      preferredModelId: "cosyvoice-v3.5-flash",
+      compatibility: {
+        scope: "model",
+        enforced: true,
+        modelIds: ["cosyvoice-v3.5-flash"]
+      },
+      createdAt: new Date(0).toISOString()
+    };
+    const capabilities: TTSCapabilities = {
+      providerId: "cosyvoice",
+      providerName: "CosyVoice",
+      adapterVersion: "0.0.0",
+      voiceCompatibilityPolicy: {
+        kind: "same_model",
+        enforcedBy: "vendor"
+      },
+      vendorFeatures: {
+        supportsHttpTTS: true,
+        supportsStreamingTTS: true,
+        supportsPersistentVoiceClone: true,
+        supportsInstantVoiceClone: false,
+        supportsVoiceCloneDelete: false
+      },
+      vendorModels: [],
+      operations: {}
+    };
+
+    expect(voice.compatibility?.scope).toBe("model");
+    expect(capabilities.voiceCompatibilityPolicy?.kind).toBe("same_model");
   });
 
   it("requires clone execution to consume planned requests", async () => {

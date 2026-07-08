@@ -1,4 +1,4 @@
-import type { TTSCapabilities, TTSVendorModel } from "@tts-platform/core";
+import type { TTSCapabilities, TTSVendorModel, VoiceCompatibilityPolicy } from "@tts-platform/core";
 import { cosyVoiceExtensionSchema, cosyVoiceTtsExtensionSchema } from "./extension-schema";
 
 export const COSYVOICE_PROVIDER_ID = "cosyvoice";
@@ -16,6 +16,13 @@ const cosyVoiceModels = [
 
 const outputFormats = ["mp3", "wav"] as const;
 const sampleRatesHz = [16000, 24000, 48000] as const;
+
+// cosyVoiceSameModelPolicy: CosyVoice 复刻音色与创建 target_model 绑定，能力声明需要在 provider/model/operation 三层复用。
+const cosyVoiceSameModelPolicy: VoiceCompatibilityPolicy = {
+  kind: "same_model",
+  enforcedBy: "vendor",
+  notes: ["CosyVoice voice_id 与创建时 target_model 绑定，不能跨模型复用。"]
+};
 
 // cosyVoiceModel: 入参为模型 ID；输出模型级 canonical 能力和默认输出配置。
 function cosyVoiceModel(modelId: (typeof cosyVoiceModels)[number]): TTSVendorModel {
@@ -66,9 +73,12 @@ function cosyVoiceModel(modelId: (typeof cosyVoiceModels)[number]): TTSVendorMod
         supportedAudioFormats: ["wav", "mp3", "m4a"],
         minReferenceAudioSeconds: 10,
         maxReferenceAudioSeconds: 60,
-        maxReferenceAudioFiles: 1
-      }
+        maxReferenceAudioFiles: 1,
+        resultCompatibility: cosyVoiceSameModelPolicy
+      },
+      voiceCompatibilityPolicy: cosyVoiceSameModelPolicy
     },
+    voiceCompatibilityPolicy: cosyVoiceSameModelPolicy,
     defaultConfiguration: {
       output: {
         format: "mp3",
@@ -95,6 +105,7 @@ export function cosyVoiceCapabilities(adapterVersion = COSYVOICE_ADAPTER_VERSION
     providerId: COSYVOICE_PROVIDER_ID,
     providerName: "CosyVoice",
     adapterVersion,
+    voiceCompatibilityPolicy: cosyVoiceSameModelPolicy,
     vendorFeatures: {
       supportsHttpTTS: true,
       supportsStreamingTTS: true,
@@ -111,6 +122,7 @@ export function cosyVoiceCapabilities(adapterVersion = COSYVOICE_ADAPTER_VERSION
         outputFormats: [...outputFormats],
         sampleRatesHz: [...sampleRatesHz],
         maxTextChars: 10000,
+        voiceCompatibilityPolicy: cosyVoiceSameModelPolicy,
         canonicalControls: cosyVoiceModel(COSYVOICE_DEFAULT_MODEL).canonicalCapabilities.canonicalControls,
         vendorExtensionSchema: cosyVoiceExtensionSchema("tts.sync"),
         notes: ["CosyVoice HTTP non-realtime synthesis currently uses the Beijing Workspace endpoint."]
@@ -126,6 +138,7 @@ export function cosyVoiceCapabilities(adapterVersion = COSYVOICE_ADAPTER_VERSION
         maxTextChars: 10000,
         supportsTimestamps: false,
         supportsInterruption: false,
+        voiceCompatibilityPolicy: cosyVoiceSameModelPolicy,
         canonicalControls: cosyVoiceModel(COSYVOICE_DEFAULT_MODEL).canonicalCapabilities.canonicalControls,
         vendorExtensionSchema: cosyVoiceExtensionSchema("tts.stream"),
         notes: ["Current adapter creates stream plans; upstream CosyVoice WebSocket transport is the next layer."]
@@ -140,7 +153,12 @@ export function cosyVoiceCapabilities(adapterVersion = COSYVOICE_ADAPTER_VERSION
           supportedAudioFormats: ["wav", "mp3", "m4a"],
           minReferenceAudioSeconds: 10,
           maxReferenceAudioSeconds: 60,
-          maxReferenceAudioFiles: 1
+          maxReferenceAudioFiles: 1,
+          resultCompatibility: {
+            kind: "same_model",
+            enforcedBy: "vendor",
+            notes: ["CosyVoice voice_id 与创建时 target_model 绑定，不能跨模型复用。"]
+          }
         },
         canonicalControls: {},
         vendorExtensionSchema: cosyVoiceExtensionSchema("voice.clone.create")

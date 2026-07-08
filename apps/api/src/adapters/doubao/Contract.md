@@ -4,7 +4,12 @@
 
 - Provider ID: `doubao`
 - Adapter version: `0.1.0`
-- Default Resource Id: `seed-icl-2.0`
+- Default TTS Resource Id: `seed-tts-2.0`
+- Default voice clone Resource Id: `seed-icl-2.0`
+- `seed-tts-*` 系列用于普通 TTS 音色合成资源。
+- `seed-icl-*` 系列用于声音复刻创建，也用于复刻音色后续合成时的 `X-Api-Resource-Id`。
+- 平台内的受控音色会记录 `compatibility.scope=resource`，用于把 speaker 与 `X-Api-Resource-Id` 匹配起来。
+- TTS 请求中的 `req_params.model` 是复刻 2.0 的厂商子模型参数，默认 `seed-tts-2.0-standard`。
 - Base URL: `https://openspeech.bytedance.com`
 
 ## Environment
@@ -77,7 +82,8 @@ Body:
 
 | Canonical field | Doubao field |
 | --- | --- |
-| `model` | `X-Api-Resource-Id` |
+| `model` | 普通音色场景下映射到 `X-Api-Resource-Id` |
+| `voice.compatibility.resourceIds[0]` | 复刻音色场景下优先映射到 `X-Api-Resource-Id` |
 | `text` | `req_params.text` |
 | `ssml` | `req_params.ssml` |
 | `voice.providerVoiceId` | `req_params.speaker` |

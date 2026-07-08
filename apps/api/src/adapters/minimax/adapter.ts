@@ -18,7 +18,9 @@ import {
   type TTSSyncProviderResult,
   type TTSOutputFormat,
   type VendorExtensionSchema,
-  type VendorPayload
+  type VendorPayload,
+  type VoiceCompatibility,
+  type VoiceRecord
 } from "@tts-platform/core";
 import { createPlanId } from "../../utils/ids";
 import { MINIMAX_ADAPTER_VERSION, minimaxCapabilities } from "./capabilities";
@@ -80,6 +82,21 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
   // extensionSchema: 入参为 operation；返回该 operation 对应的 MiniMax vendor extension schema。
   extensionSchema(operation: TTSOperation): VendorExtensionSchema {
     return minimaxExtensionSchema(operation);
+  }
+
+  // voiceCompatibility: 入参为本地 voice 记录；输出 MiniMax 当前仅作为推荐模型的 provider 级兼容事实。
+  voiceCompatibility(voice: VoiceRecord): VoiceCompatibility | undefined {
+    if (voice.compatibility !== undefined) {
+      return voice.compatibility;
+    }
+    return voice.modelId === undefined
+      ? undefined
+      : {
+          scope: "provider",
+          enforced: false,
+          preferredModelIds: [voice.modelId],
+          notes: ["MiniMax 文档未确认 voice_id 与 clone model 强绑定，modelId 仅作为推荐模型。"]
+        };
   }
 
   // plan: 入参为平台 operation request；输出 MiniMax plan，包含 vendor request 和 mapping report。
@@ -684,6 +701,18 @@ export class MiniMaxTTSAdapter implements TTSAdapter {
       displayName: plan.canonicalRequest.displayName,
       source: "cloned" as const,
       ...(plan.canonicalRequest.model === undefined ? {} : { modelId: plan.canonicalRequest.model }),
+      ...(plan.canonicalRequest.model === undefined ? {} : { createdWithModelId: plan.canonicalRequest.model }),
+      ...(plan.canonicalRequest.model === undefined ? {} : { preferredModelId: plan.canonicalRequest.model }),
+      ...(plan.canonicalRequest.model === undefined
+        ? {}
+        : {
+            compatibility: {
+              scope: "provider" as const,
+              enforced: false as const,
+              preferredModelIds: [plan.canonicalRequest.model],
+              notes: ["MiniMax 文档未确认 voice_id 与 clone model 强绑定，modelId 仅作为推荐模型。"]
+            }
+          }),
       ...(plan.canonicalRequest.language === undefined ? {} : { language: plan.canonicalRequest.language }),
       createdAt: new Date().toISOString(),
       sourceOperation: "voice.clone.create" as const,

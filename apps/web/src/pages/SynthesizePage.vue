@@ -21,15 +21,15 @@
         <ProviderSelector v-model="providerId" :providers="store.providers" />
         <v-btn-toggle
           v-model="operationMode"
-          v-if="supportsSyncOperation || supportsStreamOperation"
+          v-if="providerSupportsSyncOperation || providerSupportsStreamOperation"
           class="mb-4"
           color="primary"
           divided
           mandatory
           variant="outlined"
         >
-          <v-btn v-if="supportsSyncOperation" value="sync" prepend-icon="mdi-file-music">同步</v-btn>
-          <v-btn v-if="supportsStreamOperation" value="stream" prepend-icon="mdi-access-point">流式</v-btn>
+          <v-btn v-if="providerSupportsSyncOperation" value="sync" prepend-icon="mdi-file-music">同步</v-btn>
+          <v-btn v-if="providerSupportsStreamOperation" value="stream" prepend-icon="mdi-access-point">流式</v-btn>
         </v-btn-toggle>
         <v-textarea v-model="text" auto-grow label="文本" rows="5" variant="outlined" />
         <v-row>
@@ -68,13 +68,20 @@
             <v-text-field v-else v-model="language" label="语言" variant="outlined" />
           </v-col>
           <v-col cols="12" md="4">
-            <v-select v-model="format" :items="formats" label="编码格式" variant="outlined" />
+            <v-select
+              v-model="format"
+              :items="formats"
+              label="编码格式"
+              :disabled="formats.length === 0"
+              variant="outlined"
+            />
           </v-col>
           <v-col cols="12" md="4">
             <v-select
               v-model.number="sampleRateHz"
               :items="sampleRates"
               label="采样率"
+              :disabled="sampleRates.length === 0"
               variant="outlined"
             />
           </v-col>
@@ -246,7 +253,8 @@ import type {
   TTSStreamRequest,
   TTSSyncRequest,
   VendorDirectiveMode,
-  VendorPayload
+  VendorPayload,
+  VoiceRecord
 } from "@tts-platform/core";
 import { computed, onMounted, ref, watch } from "vue";
 import AudioPlayer from "../components/AudioPlayer.vue";
@@ -269,6 +277,7 @@ import {
   languageOptionsForModel,
   modelById,
   modelOptions,
+  providerSupportsOperation,
   requiresExplicitVoiceForModel,
   sampleRateOptionsForModel,
   supportsOperation,
@@ -300,6 +309,7 @@ const vendorExtensionJson = ref("{}");
 const submitting = ref(false);
 const error = ref("");
 const knownVoiceIds = ref(new Set<string>());
+const managedVoices = ref<VoiceRecord[]>([]);
 const voiceItems = ref<Array<{ title: string; value: string }>>([]);
 const runs = ref<ArchivedRunSummary[]>([]);
 const runsLoading = ref(false);
@@ -326,14 +336,25 @@ const vendorModeItems: Array<{ title: string; value: VendorDirectiveMode }> = [
 ];
 const runDetailTabItems = runDetailTabs();
 const currentCapabilities = computed(() => store.capabilities[providerId.value]);
-const currentModel = computed(() => modelById(currentCapabilities.value, model.value));
+const currentOperation = computed<"tts.sync" | "tts.stream">(() =>
+  operationMode.value === "stream" ? "tts.stream" : "tts.sync"
+);
+const currentModel = computed(() => modelById(currentCapabilities.value, model.value, currentOperation.value));
+const providerSupportsSyncOperation = computed(() => providerSupportsOperation(currentCapabilities.value, "tts.sync"));
+const providerSupportsStreamOperation = computed(() => providerSupportsOperation(currentCapabilities.value, "tts.stream"));
 const supportsSyncOperation = computed(() => supportsOperation(currentCapabilities.value, currentModel.value, "tts.sync"));
 const supportsStreamOperation = computed(() =>
   supportsOperation(currentCapabilities.value, currentModel.value, "tts.stream")
 );
-const modelItems = computed(() => modelOptions(currentCapabilities.value));
-const formats = computed(() => formatOptionsForModel(currentModel.value));
-const sampleRates = computed(() => sampleRateOptionsForModel(currentModel.value));
+const selectedManagedVoice = computed(() => {
+  const selectedVoiceId = voiceInputValue(voiceIdInput.value);
+  return managedVoices.value.find((voice) => voice.voiceId === selectedVoiceId);
+});
+const modelItems = computed(() => modelOptions(currentCapabilities.value, currentOperation.value, selectedManagedVoice.value));
+const formats = computed(() => formatOptionsForModel(currentModel.value, currentCapabilities.value, currentOperation.value));
+const sampleRates = computed(() =>
+  sampleRateOptionsForModel(currentModel.value, currentCapabilities.value, currentOperation.value)
+);
 const languageItems = computed(() => languageOptionsForModel(currentModel.value));
 const providerVoicePlaceholder = computed(() => defaultVoicePlaceholderForModel(currentModel.value));
 const synthesisRuns = computed(() => syncSynthesisRuns(runs.value));
@@ -371,17 +392,18 @@ watch(
   }
 );
 
-watch(model, async () => {
-  voiceIdInput.value = "";
+watch(model, () => {
   applyModelDefaults();
   applyVendorExtensionTemplate();
-  if (providerId.value.length > 0) {
-    try {
-      await loadVoiceOptions(providerId.value);
-    } catch (caught) {
-      error.value = caught instanceof Error ? caught.message : "加载音色列表失败。";
-    }
-  }
+});
+
+watch(voiceIdInput, () => {
+  applyVoiceCompatibilityDefaults();
+});
+
+watch(operationMode, async () => {
+  applyProviderDefaults(currentCapabilities.value);
+  applyVendorExtensionTemplate();
 });
 
 async function submit() {
@@ -409,19 +431,17 @@ async function submit() {
       voice.language = language.value;
     }
 
+    const output = buildOutputPreferences();
     const request: TTSSyncRequest | TTSStreamRequest = {
       operation: operationMode.value === "stream" ? "tts.stream" : "tts.sync",
       providerId: providerId.value,
       text: text.value,
       model: model.value,
       voice,
-      output: {
-        format: format.value,
-        sampleRateHz: sampleRateHz.value
-      },
       vendor: {
         mode: vendorMode.value
-      }
+      },
+      ...(output === undefined ? {} : { output })
     };
 
     if (Object.keys(vendorParams).length > 0) {
@@ -565,29 +585,44 @@ async function loadRunDetail(runId: string) {
 
 // applyProviderDefaults: 入参为 provider capability；功能是选择默认模型并刷新模型相关表单默认值。
 function applyProviderDefaults(capabilities: typeof currentCapabilities.value) {
-  const preferredOperation =
-    operationMode.value === "stream" && capabilities?.operations["tts.stream"]?.supported === true ? "tts.stream" : "tts.sync";
-  const nextModel = defaultModelForOperation(capabilities, preferredOperation);
+  if (!providerSupportsOperation(capabilities, currentOperation.value)) {
+    operationMode.value = providerSupportsOperation(capabilities, "tts.sync") ? "sync" : "stream";
+  }
+  const nextModel = defaultModelForOperation(capabilities, currentOperation.value, selectedManagedVoice.value);
   if (nextModel.length > 0) {
     model.value = nextModel;
+  } else {
+    model.value = "";
   }
   applyModelDefaults();
 }
 
+// applyVoiceCompatibilityDefaults: 无入参；功能是选中有强兼容约束的本地音色后，切换到允许的合成模型。
+function applyVoiceCompatibilityDefaults() {
+  const availableModelIds = modelItems.value.map((item) => item.value);
+  if (availableModelIds.length === 0) {
+    return;
+  }
+  if (!availableModelIds.includes(model.value)) {
+    model.value = defaultModelForOperation(currentCapabilities.value, currentOperation.value, selectedManagedVoice.value);
+  }
+}
+
 // applyModelDefaults: 无入参；功能是根据当前模型刷新格式、采样率和语言默认值。
 function applyModelDefaults() {
-  if (operationMode.value === "stream" && !supportsStreamOperation.value) {
-    operationMode.value = "sync";
+  if (currentModel.value === undefined) {
+    const nextModel = defaultModelForOperation(currentCapabilities.value, currentOperation.value, selectedManagedVoice.value);
+    if (nextModel.length > 0 && nextModel !== model.value) {
+      model.value = nextModel;
+      return;
+    }
   }
-  if (operationMode.value === "sync" && !supportsSyncOperation.value && supportsStreamOperation.value) {
-    operationMode.value = "stream";
-  }
-  const nextFormat = defaultFormatForModel(currentModel.value);
+  const nextFormat = defaultFormatForModel(currentModel.value, currentCapabilities.value, currentOperation.value);
   if (nextFormat !== undefined) {
     format.value = nextFormat;
   }
 
-  const nextSampleRateHz = defaultSampleRateForModel(currentModel.value);
+  const nextSampleRateHz = defaultSampleRateForModel(currentModel.value, currentCapabilities.value, currentOperation.value);
   if (nextSampleRateHz !== undefined) {
     sampleRateHz.value = nextSampleRateHz;
   }
@@ -599,19 +634,31 @@ function applyModelDefaults() {
 function applyVendorExtensionTemplate() {
   vendorExtensionJson.value = vendorExtensionTemplateForOperation(
     currentCapabilities.value,
-    "tts.sync",
+    currentOperation.value,
     currentModel.value
   );
 }
 
-// loadVoiceOptions: 入参为 providerId；功能是加载本地已克隆音色并刷新合成页音色候选。
+// buildOutputPreferences: 无入参；功能是只提交当前模型 capability 允许的输出参数。
+function buildOutputPreferences(): TTSSyncRequest["output"] | undefined {
+  const output: NonNullable<TTSSyncRequest["output"]> = {};
+  if (formats.value.includes(format.value)) {
+    output.format = format.value;
+  }
+  if (sampleRates.value.includes(sampleRateHz.value)) {
+    output.sampleRateHz = sampleRateHz.value;
+  }
+  return Object.keys(output).length === 0 ? undefined : output;
+}
+
+// loadVoiceOptions: 入参为 providerId；功能是加载当前厂商本地音色并刷新合成页音色候选。
 async function loadVoiceOptions(nextProviderId: string) {
   const voices = await listVoices({
-    providerId: nextProviderId,
-    ...(model.value.length === 0 ? {} : { modelId: model.value })
+    providerId: nextProviderId
   });
+  managedVoices.value = voices;
   knownVoiceIds.value = new Set(voices.map((voice) => voice.voiceId));
-  voiceItems.value = voiceOptions(voices, model.value);
+  voiceItems.value = voiceOptions(voices);
 }
 
 // loadRuns: 无入参；功能是刷新语音合成页面下方的同步合成记录。

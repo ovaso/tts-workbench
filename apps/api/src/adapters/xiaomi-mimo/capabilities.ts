@@ -1,4 +1,4 @@
-import type { TTSCapabilities, TTSVendorModel } from "@tts-platform/core";
+import type { TTSCapabilities, TTSVendorModel, VoiceCompatibilityPolicy } from "@tts-platform/core";
 import { xiaomiMiMoExtensionSchema } from "./extension-schema";
 
 export const XIAOMI_MIMO_PROVIDER_ID = "xiaomi_mimo";
@@ -9,6 +9,13 @@ export const XIAOMI_MIMO_DEFAULT_VOICE_ID = "mimo_default";
 const outputFormats = ["wav"] as const;
 const streamChunkFormats = ["pcm"] as const;
 const sampleRatesHz = [24000] as const;
+
+// xiaomiMiMoInstantOnlyPolicy: MiMo voiceclone 是即时复刻合成，结果音色不可复用于后续 TTS 请求。
+const xiaomiMiMoInstantOnlyPolicy: VoiceCompatibilityPolicy = {
+  kind: "instant_only",
+  enforcedBy: "vendor",
+  notes: ["MiMo voiceclone 是即时复刻合成，不产生可复用持久 voiceId。"]
+};
 
 // xiaomiMiMoModel: 入参为模型 id；输出该 MiMo 模型在平台中的 capability 描述。
 function xiaomiMiMoModel(modelId: "mimo-v2.5-tts" | "mimo-v2.5-tts-voicedesign" | "mimo-v2.5-tts-voiceclone"): TTSVendorModel {
@@ -29,9 +36,11 @@ function xiaomiMiMoModel(modelId: "mimo-v2.5-tts" | "mimo-v2.5-tts-voicedesign" 
           instant: true,
           requiresTranscript: false,
           supportedAudioFormats: ["mp3", "wav"],
-          maxReferenceAudioFiles: 1
+          maxReferenceAudioFiles: 1,
+          resultCompatibility: xiaomiMiMoInstantOnlyPolicy
         }
       },
+      voiceCompatibilityPolicy: xiaomiMiMoInstantOnlyPolicy,
       defaultConfiguration: {
         output: {
           format: "wav",
@@ -112,6 +121,7 @@ export function xiaomiMiMoCapabilities(adapterVersion = XIAOMI_MIMO_ADAPTER_VERS
     providerId: XIAOMI_MIMO_PROVIDER_ID,
     providerName: "Xiaomi MiMo",
     adapterVersion,
+    voiceCompatibilityPolicy: xiaomiMiMoInstantOnlyPolicy,
     vendorFeatures: {
       supportsHttpTTS: true,
       supportsStreamingTTS: true,
@@ -165,7 +175,8 @@ export function xiaomiMiMoCapabilities(adapterVersion = XIAOMI_MIMO_ADAPTER_VERS
           instant: true,
           requiresTranscript: false,
           supportedAudioFormats: ["mp3", "wav"],
-          maxReferenceAudioFiles: 1
+          maxReferenceAudioFiles: 1,
+          resultCompatibility: xiaomiMiMoInstantOnlyPolicy
         },
         canonicalControls: xiaomiMiMoCanonicalControls(),
         vendorExtensionSchema: xiaomiMiMoExtensionSchema("voice.clone.instant")

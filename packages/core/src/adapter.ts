@@ -1,4 +1,4 @@
-import type { TTSCapabilities } from "./capabilities";
+import type { TTSCapabilities, VoiceCompatibility } from "./capabilities";
 import type { MappingReport } from "./mapping-report";
 import type { TTSOperation } from "./operations";
 import type {
@@ -14,7 +14,8 @@ import type {
   TTSStreamEvent,
   VoiceCloneDeleteResult,
   VoiceCloneInstantProviderResult,
-  VoiceCloneResult
+  VoiceCloneResult,
+  VoiceRecord
 } from "./results";
 import type { VendorExtensionSchema, VendorPayload } from "./vendor-extension";
 
@@ -67,6 +68,7 @@ export interface TTSAdapter {
 
   capabilities(): TTSCapabilities;
   extensionSchema(operation: TTSOperation): VendorExtensionSchema;
+  voiceCompatibility?(voice: VoiceRecord): VoiceCompatibility | undefined;
   plan(request: TTSOperationRequest): Promise<TTSPlan>;
 
   synthesizeSync?(plan: TTSSyncPlan): Promise<TTSSyncProviderResult>;

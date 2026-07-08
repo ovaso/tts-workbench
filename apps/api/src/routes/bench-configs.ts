@@ -1,6 +1,7 @@
 import {
   TTSError,
   type BenchConfigCreateRequest,
+  type BenchConfigSetCreateRequest,
   type TTSCanonicalControls,
   type TTSOutputPreferences,
   type TTSVoiceSelection,
@@ -22,6 +23,17 @@ export async function registerBenchConfigRoutes(
   app.post("/v1/bench-configs", async (request, reply) => {
     const config = configs.save(parseBenchConfigCreateRequest(request.body));
     return reply.status(201).send({ config });
+  });
+
+  app.get("/v1/bench-config-sets", async () => {
+    return {
+      sets: configs.listSets()
+    };
+  });
+
+  app.post("/v1/bench-config-sets", async (request, reply) => {
+    const set = configs.saveSet(parseBenchConfigSetCreateRequest(request.body));
+    return reply.status(201).send({ set });
   });
 }
 
@@ -49,6 +61,19 @@ function parseBenchConfigCreateRequest(body: unknown): BenchConfigCreateRequest 
   const vendor = parseVendorDirective(input.vendor);
   if (vendor !== undefined) {
     request.vendor = vendor;
+  }
+  return request;
+}
+
+// parseBenchConfigSetCreateRequest: 入参为 HTTP body；输出可保存的 Benchmark 配置组合创建请求。
+function parseBenchConfigSetCreateRequest(body: unknown): BenchConfigSetCreateRequest {
+  const input = requireObject(body, "request body");
+  const request: BenchConfigSetCreateRequest = {
+    name: requireTrimmedString(input.name, "name"),
+    configIds: parseStringList(input.configIds, "configIds")
+  };
+  if (typeof input.description === "string" && input.description.trim().length > 0) {
+    request.description = input.description.trim();
   }
   return request;
 }
@@ -172,6 +197,14 @@ function requireNumber(value: unknown, label: string): number {
     throw new TTSError(`${label} must be a number.`, "invalid_request", 400);
   }
   return value;
+}
+
+// parseStringList: 入参为未知数组和字段名；输出 trim 后的非空字符串列表。
+function parseStringList(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new TTSError(`${label} must be an array.`, "invalid_request", 400);
+  }
+  return value.map((item, index) => requireTrimmedString(item, `${label}[${index}]`));
 }
 
 function isOutputFormat(value: unknown): value is NonNullable<TTSOutputPreferences["format"]> {

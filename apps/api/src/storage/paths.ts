@@ -22,6 +22,21 @@ export function benchConfigsRoot(dataRoot: string): string {
   return path.join(dataRoot, "bench-configs");
 }
 
+// datasetsRoot: 入参为 data root；返回本地 datasets 目录。
+export function datasetsRoot(dataRoot: string): string {
+  return path.join(dataRoot, "datasets");
+}
+
+// benchmarkRunsRoot: 入参为 data root；返回本地 Benchmark run archive 根目录。
+export function benchmarkRunsRoot(dataRoot: string): string {
+  return path.join(dataRoot, "benchmark-runs");
+}
+
+// benchmarkRunRoot: 入参为 data root 和 benchmarkRunId；返回单个 Benchmark run archive 目录。
+export function benchmarkRunRoot(dataRoot: string, benchmarkRunId: string): string {
+  return path.join(benchmarkRunsRoot(dataRoot), benchmarkRunId);
+}
+
 // findWorkspaceRoot: 入参为起始目录；向上查找 pnpm-workspace.yaml，找不到时回退到当前工作目录。
 function findWorkspaceRoot(startDirectory: string): string {
   let current = path.resolve(startDirectory);

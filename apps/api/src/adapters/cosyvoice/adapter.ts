@@ -17,8 +17,10 @@ import {
   type TTSSyncProviderResult,
   type VendorExtensionSchema,
   type VendorPayload,
+  type VoiceCompatibility,
   type VoiceClonePlan,
-  type VoiceCloneResult
+  type VoiceCloneResult,
+  type VoiceRecord
 } from "@tts-platform/core";
 import { createPlanId } from "../../utils/ids";
 import {
@@ -95,6 +97,15 @@ export class CosyVoiceTTSAdapter implements TTSAdapter {
     return cosyVoiceExtensionSchema(operation);
   }
 
+  // voiceCompatibility: 入参为本地 voice 记录；输出 CosyVoice voice_id 与 target_model 的强绑定关系。
+  voiceCompatibility(voice: VoiceRecord): VoiceCompatibility | undefined {
+    if (voice.compatibility !== undefined) {
+      return voice.compatibility;
+    }
+    const modelId = voice.modelId ?? stringValue(voice.vendorMetadata?.targetModel);
+    return modelId === undefined ? undefined : cosyVoiceModelCompatibility(modelId);
+  }
+
   // plan: 入参为平台 operation request；输出 CosyVoice plan，包含 vendor request 和 mapping report。
   async plan(request: TTSOperationRequest): Promise<TTSSyncPlan | TTSStreamPlan | VoiceClonePlan> {
     if (request.operation === "voice.clone.create") {
@@ -115,6 +126,7 @@ export class CosyVoiceTTSAdapter implements TTSAdapter {
     if (model === undefined) {
       throw new TTSError(`CosyVoice model '${modelId}' was not found.`, "invalid_request", 400);
     }
+    assertCosyVoiceCompatibility(request.voice.compatibility, modelId);
 
     const directiveMode = request.vendor?.mode ?? "prefer_vendor";
     const extension = request.vendor?.extensions?.[this.providerId];
@@ -541,6 +553,9 @@ export class CosyVoiceTTSAdapter implements TTSAdapter {
       displayName: plan.canonicalRequest.displayName,
       source: "cloned" as const,
       modelId: String(objectAt(plan.vendorRequest, "input").target_model ?? COSYVOICE_DEFAULT_MODEL),
+      createdWithModelId: String(objectAt(plan.vendorRequest, "input").target_model ?? COSYVOICE_DEFAULT_MODEL),
+      preferredModelId: String(objectAt(plan.vendorRequest, "input").target_model ?? COSYVOICE_DEFAULT_MODEL),
+      compatibility: cosyVoiceModelCompatibility(String(objectAt(plan.vendorRequest, "input").target_model ?? COSYVOICE_DEFAULT_MODEL)),
       ...(plan.canonicalRequest.language === undefined ? {} : { language: plan.canonicalRequest.language }),
       createdAt: new Date().toISOString(),
       sourceOperation: "voice.clone.create" as const,
@@ -809,6 +824,33 @@ function isHttpUrl(value: string): boolean {
 
 function numberDefault(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+// stringValue: 入参为未知值；输出非空字符串，供历史 voice metadata 兼容读取。
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+// cosyVoiceModelCompatibility: 入参为 target_model；输出 CosyVoice voice_id 的同模型强绑定事实。
+function cosyVoiceModelCompatibility(modelId: string): VoiceCompatibility {
+  return {
+    scope: "model",
+    enforced: true,
+    modelIds: [modelId],
+    preferredModelIds: [modelId],
+    notes: ["CosyVoice voice_id 与创建时 target_model 绑定，不能跨模型复用。"]
+  };
+}
+
+// assertCosyVoiceCompatibility: 入参为请求音色兼容事实和目标模型；功能是在厂商调用前阻止跨模型 voice_id。
+function assertCosyVoiceCompatibility(compatibility: VoiceCompatibility | undefined, modelId: string): void {
+  if (compatibility?.scope === "model" && !compatibility.modelIds.includes(modelId)) {
+    throw new TTSError(
+      `CosyVoice voice is only compatible with model(s): ${compatibility.modelIds.join(", ")}.`,
+      "invalid_request",
+      400
+    );
+  }
 }
 
 function outputFormatFromVendor(vendorRequest: VendorPayload): TTSOutputFormat {

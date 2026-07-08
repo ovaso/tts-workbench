@@ -1,4 +1,4 @@
-import type { TTSOutputFormat, TTSStreamProtocol } from "./capabilities";
+import type { TTSOutputFormat, TTSStreamProtocol, VoiceCompatibility } from "./capabilities";
 import type { TTSOperation } from "./operations";
 import type { VendorPayload } from "./vendor-extension";
 
@@ -134,6 +134,9 @@ export interface VoiceRecord {
   displayName: string;
   source: "vendor_builtin" | "cloned" | "external";
   modelId?: string;
+  createdWithModelId?: string;
+  preferredModelId?: string;
+  compatibility?: VoiceCompatibility;
   language?: string;
   createdAt: string;
   sourceOperation?: Extract<TTSOperation, "voice.clone.create" | "voice.clone.instant">;
@@ -157,6 +160,9 @@ export interface VoiceCreateRequest {
   displayName: string;
   source: "vendor_builtin" | "external";
   modelId?: string;
+  createdWithModelId?: string;
+  preferredModelId?: string;
+  compatibility?: VoiceCompatibility;
   language?: string;
   vendorMetadata?: VendorPayload;
 }

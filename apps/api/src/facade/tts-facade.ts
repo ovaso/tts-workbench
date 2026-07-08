@@ -12,6 +12,7 @@ import {
   type VoiceCloneInstantResult,
   type VoiceCloneRequest,
   type VoiceCloneResult,
+  type VoiceCompatibility,
   type VoiceCreateRequest,
   type VoiceDeleteResult,
   type VoiceQuery,
@@ -37,8 +38,8 @@ export class TTSFacade {
   }
 
   async synthesizeSync(request: TTSSyncRequest): Promise<TTSSyncResult> {
-    const resolvedRequest = this.resolveVoiceSelection(request);
-    const adapter = this.registry.getOrThrow(resolvedRequest.providerId);
+    const adapter = this.registry.getOrThrow(request.providerId);
+    const resolvedRequest = this.resolveVoiceSelection(request, adapter);
     const plan = await adapter.plan(resolvedRequest);
 
     if (plan.operation !== "tts.sync" || adapter.synthesizeSync === undefined) {
@@ -59,8 +60,8 @@ export class TTSFacade {
 
   // prepareStream: 入参为流式合成请求；输出已 plan 的 stream session 执行上下文。
   async prepareStream(request: TTSStreamRequest): Promise<TTSPreparedStreamSession> {
-    const resolvedRequest = this.resolveVoiceSelection(request);
-    const adapter = this.registry.getOrThrow(resolvedRequest.providerId);
+    const adapter = this.registry.getOrThrow(request.providerId);
+    const resolvedRequest = this.resolveVoiceSelection(request, adapter);
     const plan = await adapter.plan(resolvedRequest);
 
     if (plan.operation !== "tts.stream" || adapter.synthesizeStream === undefined) {
@@ -134,12 +135,12 @@ export class TTSFacade {
   }
 
   listVoices(query?: VoiceQuery): VoiceRecord[] {
-    return this.voices.list(query);
+    return this.voices.list(query).map((voice) => this.withAdapterVoiceCompatibility(voice));
   }
 
   // createVoice: 入参为手动登记音色请求；输出写入本地 registry 后的受控音色记录。
   createVoice(request: VoiceCreateRequest): VoiceRecord {
-    return this.voices.save({
+    const voice = {
       voiceId: `${request.providerId}:${request.providerVoiceId}`,
       providerId: request.providerId,
       providerVoiceId: request.providerVoiceId,
@@ -147,9 +148,13 @@ export class TTSFacade {
       source: request.source,
       createdAt: new Date().toISOString(),
       ...(request.modelId === undefined ? {} : { modelId: request.modelId }),
+      ...(request.createdWithModelId === undefined ? {} : { createdWithModelId: request.createdWithModelId }),
+      ...(request.preferredModelId === undefined ? {} : { preferredModelId: request.preferredModelId }),
+      ...(request.compatibility === undefined ? {} : { compatibility: request.compatibility }),
       ...(request.language === undefined ? {} : { language: request.language }),
       ...(request.vendorMetadata === undefined ? {} : { vendorMetadata: request.vendorMetadata })
-    });
+    };
+    return this.voices.save(this.withAdapterVoiceCompatibility(voice));
   }
 
   // deleteVoice: 入参为平台 voiceId；输出本地受控音色删除结果，不调用厂商删除接口。
@@ -166,8 +171,11 @@ export class TTSFacade {
     };
   }
 
-  // resolveVoiceSelection: 入参为同步合成请求；功能是把平台 voiceId 解析为厂商 providerVoiceId。
-  private resolveVoiceSelection<TRequest extends TTSSyncRequest | TTSStreamRequest>(request: TRequest): TRequest {
+  // resolveVoiceSelection: 入参为同步/流式合成请求和 adapter；功能是把平台 voiceId 解析为厂商 providerVoiceId，并附加厂商音色兼容事实。
+  private resolveVoiceSelection<TRequest extends TTSSyncRequest | TTSStreamRequest>(
+    request: TRequest,
+    adapter: TTSAdapter
+  ): TRequest {
     const localVoiceId = request.voice.voiceId;
     if (localVoiceId === undefined) {
       return request;
@@ -185,14 +193,74 @@ export class TTSFacade {
       );
     }
 
+    const compatibility = adapter.voiceCompatibility?.(voice) ?? voice.compatibility;
+    const requestWithModel = applyVoiceModelCompatibility(request, compatibility);
     return {
-      ...request,
+      ...requestWithModel,
       voice: {
-        ...request.voice,
-        providerVoiceId: voice.providerVoiceId
+        ...requestWithModel.voice,
+        providerVoiceId: voice.providerVoiceId,
+        ...(compatibility === undefined ? {} : { compatibility })
       }
     } as TRequest;
   }
+
+  // withAdapterVoiceCompatibility: 入参为 voice registry 记录；输出补齐 adapter 推导兼容事实后的 voice 记录。
+  private withAdapterVoiceCompatibility(voice: VoiceRecord): VoiceRecord {
+    const adapter = this.registry.get(voice.providerId);
+    const compatibility = adapter?.voiceCompatibility?.(voice) ?? voice.compatibility;
+    if (compatibility === undefined || voice.compatibility !== undefined) {
+      return voice;
+    }
+    return {
+      ...voice,
+      compatibility
+    };
+  }
+}
+
+// applyVoiceModelCompatibility: 入参为合成请求和可选音色兼容事实；输出补齐或校验模型后的合成请求。
+function applyVoiceModelCompatibility<TRequest extends TTSSyncRequest | TTSStreamRequest>(
+  request: TRequest,
+  compatibility: VoiceCompatibility | undefined
+): TRequest {
+  if (compatibility === undefined) {
+    return request;
+  }
+  if (compatibility.scope === "model") {
+    const modelId = request.model;
+    if (modelId !== undefined && !compatibility.modelIds.includes(modelId)) {
+      throw new TTSError(
+        `Voice '${request.voice.voiceId ?? request.voice.providerVoiceId ?? ""}' is only compatible with model(s): ${compatibility.modelIds.join(", ")}.`,
+        "invalid_request",
+        400
+      );
+    }
+    return modelId === undefined && compatibility.modelIds[0] !== undefined
+      ? {
+          ...request,
+          model: compatibility.modelIds[0]
+        }
+      : request;
+  }
+  if (compatibility.scope === "resource") {
+    const compatibleModelIds = compatibility.compatibleModelIds ?? [];
+    const modelId = request.model;
+    if (modelId !== undefined && compatibleModelIds.length > 0 && !compatibleModelIds.includes(modelId)) {
+      throw new TTSError(
+        `Voice '${request.voice.voiceId ?? request.voice.providerVoiceId ?? ""}' requires model(s): ${compatibleModelIds.join(", ")} for resource '${compatibility.resourceIds[0] ?? ""}'.`,
+        "invalid_request",
+        400
+      );
+    }
+    return modelId === undefined && compatibleModelIds[0] !== undefined
+      ? {
+          ...request,
+          model: compatibleModelIds[0]
+        }
+      : request;
+  }
+  return request;
 }
 
 export interface TTSStreamAdapter extends TTSAdapter {

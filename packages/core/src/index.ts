@@ -1,6 +1,7 @@
 export * from "./adapter";
 export * from "./bench";
 export * from "./capabilities";
+export * from "./corpus";
 export * from "./errors";
 export * from "./json";
 export * from "./mapping-report";

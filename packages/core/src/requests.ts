@@ -1,10 +1,11 @@
-import type { ReferenceAudioFormat, TTSOutputFormat, TTSStreamProtocol } from "./capabilities";
+import type { ReferenceAudioFormat, TTSOutputFormat, TTSStreamProtocol, VoiceCompatibility } from "./capabilities";
 import type { TTSOperation } from "./operations";
 import type { VendorDirective } from "./vendor-extension";
 
 export interface TTSVoiceSelection {
   voiceId?: string;
   providerVoiceId?: string;
+  compatibility?: VoiceCompatibility;
   language?: string;
 }
 
