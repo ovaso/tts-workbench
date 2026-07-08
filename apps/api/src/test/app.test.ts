@@ -61,6 +61,11 @@ describe("api app", () => {
           providerId: "doubao",
           providerName: "Doubao",
           adapterVersion: "0.1.0"
+        },
+        {
+          providerId: "xiaomi_mimo",
+          providerName: "Xiaomi MiMo",
+          adapterVersion: "0.1.0"
         }
       ]
     });
@@ -198,6 +203,31 @@ describe("api app", () => {
       providerId: "mock",
       operation: "tts.stream",
       status: "succeeded"
+    });
+  });
+
+  it("routes instant voice clone requests through the provider adapter", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/v1/voice-clones/instant",
+      payload: {
+        providerId: "xiaomi_mimo",
+        text: "instant clone",
+        referenceAudio: [
+          {
+            uri: "data:audio/mpeg;base64,BwYF",
+            format: "mp3"
+          }
+        ]
+      }
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toMatchObject({
+      error: {
+        code: "vendor_execution_failed",
+        message: "Xiaomi MiMo API key is required."
+      }
     });
   });
 

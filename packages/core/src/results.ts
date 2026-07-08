@@ -21,6 +21,15 @@ export interface TTSSyncProviderResult {
   vendorResponse: VendorPayload;
 }
 
+export interface VoiceCloneInstantProviderResult {
+  audio: {
+    data: Uint8Array;
+    format: TTSOutputFormat;
+    sampleRateHz: number;
+  };
+  vendorResponse: VendorPayload;
+}
+
 export interface TTSSyncResult {
   runId: string;
   providerId: string;
@@ -41,6 +50,19 @@ export interface TTSStreamResult {
   status: RunStatus;
   createdAt: string;
   audio?: AudioArtifact;
+  archive: {
+    runPath: string;
+    files: string[];
+  };
+}
+
+export interface VoiceCloneInstantResult {
+  runId: string;
+  providerId: string;
+  operation: "voice.clone.instant";
+  status: RunStatus;
+  createdAt: string;
+  audio: AudioArtifact;
   archive: {
     runPath: string;
     files: string[];

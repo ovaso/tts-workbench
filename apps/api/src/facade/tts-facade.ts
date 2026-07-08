@@ -8,6 +8,8 @@ import {
   type TTSSyncResult,
   type TTSStreamRequest,
   type TTSStreamSession,
+  type VoiceCloneInstantRequest,
+  type VoiceCloneInstantResult,
   type VoiceCloneRequest,
   type VoiceCloneResult,
   type VoiceCreateRequest,
@@ -108,6 +110,27 @@ export class TTSFacade {
       providerResult
     });
     return providerResult;
+  }
+
+  // createInstantVoiceClone: 入参为即时音色复刻请求；输出归档后的即时复刻音频运行结果。
+  async createInstantVoiceClone(request: VoiceCloneInstantRequest): Promise<VoiceCloneInstantResult> {
+    const adapter = this.registry.getOrThrow(request.providerId);
+    const plan = await adapter.plan(request);
+
+    if (plan.operation !== "voice.clone.instant" || adapter.createInstantVoiceClone === undefined) {
+      throw new TTSError(
+        `Provider '${request.providerId}' does not support voice.clone.instant.`,
+        "operation_not_supported",
+        400
+      );
+    }
+
+    const providerResult = await adapter.createInstantVoiceClone(plan);
+    return this.archive.writeVoiceCloneInstant({
+      request,
+      plan,
+      providerResult
+    });
   }
 
   listVoices(query?: VoiceQuery): VoiceRecord[] {

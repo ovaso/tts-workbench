@@ -4,6 +4,7 @@ import {
   type TTSStreamEvent,
   type TTSSyncRequest,
   type TTSStreamRequest,
+  type VoiceCloneInstantRequest,
   type VoiceCloneRequest,
   type VoiceCreateRequest,
   type VendorPayload,
@@ -185,6 +186,18 @@ export async function registerSynthesizeRoutes(
     }
   );
 
+  app.post(
+    "/v1/voice-clones/instant",
+    {
+      bodyLimit: 32 * 1024 * 1024
+    },
+    async (request, reply) => {
+      const cloneRequest = parseVoiceCloneInstantRequest(request.body);
+      const result = await facade.createInstantVoiceClone(cloneRequest);
+      return reply.status(201).send(result);
+    }
+  );
+
   app.get("/v1/voices", async (request) => {
     const query = requireObject(request.query, "query");
     const providerId = typeof query.providerId === "string" ? query.providerId : undefined;
@@ -271,8 +284,80 @@ function parseVoiceCloneRequest(body: unknown): VoiceCloneRequest {
   const input = requireObject(body, "request body");
   const providerId = requireString(input.providerId, "providerId");
   const displayName = requireString(input.displayName, "displayName");
-  const referenceAudioInput = Array.isArray(input.referenceAudio) ? input.referenceAudio : [];
-  const referenceAudio = referenceAudioInput.map((item, index) => {
+  const referenceAudio = parseReferenceAudioList(input.referenceAudio);
+  const request: VoiceCloneRequest = {
+    operation: "voice.clone.create",
+    providerId,
+    displayName,
+    referenceAudio
+  };
+  if (typeof input.model === "string") {
+    request.model = input.model;
+  }
+  if (typeof input.language === "string") {
+    request.language = input.language;
+  }
+  const consent = parseVoiceCloneConsent(input.consent);
+  if (consent !== undefined) {
+    request.consent = consent;
+  }
+  const vendor = parseVendorDirective(input.vendor);
+  if (vendor !== undefined) {
+    request.vendor = vendor;
+  }
+  if (typeof input.clientRequestId === "string") {
+    request.clientRequestId = input.clientRequestId;
+  }
+  return request;
+}
+
+// parseVoiceCloneInstantRequest: 入参为 HTTP body；输出即时音色复刻请求，执行后会直接生成音频 run。
+function parseVoiceCloneInstantRequest(body: unknown): VoiceCloneInstantRequest {
+  const input = requireObject(body, "request body");
+  const providerId = requireString(input.providerId, "providerId");
+  const text = requireString(input.text, "text");
+  const request: VoiceCloneInstantRequest = {
+    operation: "voice.clone.instant",
+    providerId,
+    text,
+    referenceAudio: parseReferenceAudioList(input.referenceAudio)
+  };
+
+  if (typeof input.operation === "string" && input.operation !== "voice.clone.instant") {
+    throw new TTSError("Only operation 'voice.clone.instant' is accepted by this endpoint.", "invalid_request", 400);
+  }
+  if (typeof input.model === "string") {
+    request.model = input.model;
+  }
+  if (typeof input.language === "string") {
+    request.language = input.language;
+  }
+  const output = parseOutput(input.output);
+  if (output !== undefined) {
+    request.output = output;
+  }
+  const controls = parseControls(input.controls);
+  if (controls !== undefined) {
+    request.controls = controls;
+  }
+  const consent = parseVoiceCloneConsent(input.consent);
+  if (consent !== undefined) {
+    request.consent = consent;
+  }
+  const vendor = parseVendorDirective(input.vendor);
+  if (vendor !== undefined) {
+    request.vendor = vendor;
+  }
+  if (typeof input.clientRequestId === "string") {
+    request.clientRequestId = input.clientRequestId;
+  }
+  return request;
+}
+
+// parseReferenceAudioList: 入参为 HTTP body 中的 referenceAudio；输出 canonical reference audio 列表。
+function parseReferenceAudioList(value: unknown): VoiceCloneRequest["referenceAudio"] {
+  const referenceAudioInput = Array.isArray(value) ? value : [];
+  return referenceAudioInput.map((item, index) => {
     const audio = requireObject(item, `referenceAudio[${index}]`);
     const parsed: VoiceCloneRequest["referenceAudio"][number] = {
       uri: typeof audio.uri === "string" ? audio.uri : ""
@@ -286,25 +371,36 @@ function parseVoiceCloneRequest(body: unknown): VoiceCloneRequest {
     if (isReferenceAudioFormat(audio.format)) {
       parsed.format = audio.format;
     }
+    if (typeof audio.durationMs === "number" && Number.isFinite(audio.durationMs)) {
+      parsed.durationMs = audio.durationMs;
+    }
+    if (typeof audio.transcript === "string") {
+      parsed.transcript = audio.transcript;
+    }
     return parsed;
   });
-  const request: VoiceCloneRequest = {
-    operation: "voice.clone.create",
-    providerId,
-    displayName,
-    referenceAudio
+}
+
+// parseVoiceCloneConsent: 入参为 HTTP body 中的 consent；输出音色授权确认信息。
+function parseVoiceCloneConsent(value: unknown): VoiceCloneRequest["consent"] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const consent = requireObject(value, "consent");
+  const parsed: VoiceCloneRequest["consent"] = {
+    confirmed: consent.confirmed === true
   };
-  if (typeof input.model === "string") {
-    request.model = input.model;
+  if (typeof consent.speakerName === "string") {
+    parsed.speakerName = consent.speakerName;
   }
-  if (typeof input.language === "string") {
-    request.language = input.language;
+  if (
+    consent.usageScope === "internal_eval" ||
+    consent.usageScope === "commercial" ||
+    consent.usageScope === "research"
+  ) {
+    parsed.usageScope = consent.usageScope;
   }
-  const vendor = parseVendorDirective(input.vendor);
-  if (vendor !== undefined) {
-    request.vendor = vendor;
-  }
-  return request;
+  return parsed;
 }
 
 // parseVoiceCreateRequest: 入参为 HTTP body；输出手动登记到本地 registry 的音色请求。

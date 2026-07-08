@@ -6,6 +6,7 @@ import { CosyVoiceTTSAdapter } from "./adapters/cosyvoice/adapter";
 import { DoubaoTTSAdapter } from "./adapters/doubao/adapter";
 import { MiniMaxTTSAdapter } from "./adapters/minimax/adapter";
 import { MockTTSAdapter } from "./adapters/mock/adapter";
+import { XiaomiMiMoTTSAdapter } from "./adapters/xiaomi-mimo/adapter";
 import { AdapterRegistry } from "./facade/adapter-registry";
 import { TTSFacade } from "./facade/tts-facade";
 import { loadEnvFiles } from "./config/env";
@@ -69,6 +70,14 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
         process.env.DOUBAO_ACCESS_TOKEN ??
         process.env.doubao_access_token ??
         process.env["doubao_access-token"]
+    }),
+    // XiaomiMiMoTTSAdapter: 注册小米 MiMo；执行时需要 MIMO_API_KEY，capability 展示不依赖密钥。
+    new XiaomiMiMoTTSAdapter({
+      apiKey:
+        process.env.MIMO_API_KEY ??
+        process.env.XIAOMI_MIMO_API_KEY ??
+        process.env.xiaomi_mimo_api_key ??
+        process.env.mimo_api_key
     })
   ]);
   const archive = new FileRunArchive(options.dataRoot);

@@ -2,7 +2,14 @@ import { mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import type { VoiceClonePlan, VoiceCloneRequest, VoiceCloneResult } from "@tts-platform/core";
+import type {
+  VoiceCloneInstantPlan,
+  VoiceCloneInstantProviderResult,
+  VoiceCloneInstantRequest,
+  VoiceClonePlan,
+  VoiceCloneRequest,
+  VoiceCloneResult
+} from "@tts-platform/core";
 import { MockTTSAdapter } from "../adapters/mock/adapter";
 import { FileRunArchive } from "../storage/run-archive";
 
@@ -130,6 +137,98 @@ describe("FileRunArchive", () => {
       })
     ]);
     expect(runs[0]?.audio).toBeUndefined();
+  });
+
+  it("writes instant voice clone archives with an audio artifact", async () => {
+    const dataRoot = await mkdtemp(path.join(os.tmpdir(), "tts-archive-instant-clone-"));
+    const archive = new FileRunArchive(dataRoot);
+    const request: VoiceCloneInstantRequest = {
+      operation: "voice.clone.instant",
+      providerId: "xiaomi_mimo",
+      text: "instant clone",
+      referenceAudio: [
+        {
+          uri: "data:audio/mpeg;base64,BwYF",
+          format: "mp3"
+        }
+      ]
+    };
+    const plan: VoiceCloneInstantPlan = {
+      planId: "plan_instant_clone",
+      providerId: "xiaomi_mimo",
+      adapterVersion: "0.1.0",
+      operation: "voice.clone.instant",
+      createdAt: "2026-07-08T00:00:00.000Z",
+      canonicalRequest: request,
+      capabilitySnapshot: {
+        providerId: "xiaomi_mimo",
+        providerName: "Xiaomi MiMo",
+        adapterVersion: "0.1.0",
+        vendorFeatures: {
+          supportsHttpTTS: true,
+          supportsStreamingTTS: true,
+          supportsPersistentVoiceClone: false,
+          supportsInstantVoiceClone: true,
+          supportsVoiceCloneDelete: false
+        },
+        vendorModels: [],
+        operations: {}
+      },
+      vendorRequest: {
+        body: {
+          model: "mimo-v2.5-tts-voiceclone"
+        }
+      },
+      mappingReport: {
+        providerId: "xiaomi_mimo",
+        operation: "voice.clone.instant",
+        directiveMode: "prefer_vendor",
+        appliedCanonicalFields: [],
+        appliedVendorExtensions: [],
+        ignoredFields: [],
+        approximations: [],
+        warnings: []
+      }
+    };
+    const providerResult: VoiceCloneInstantProviderResult = {
+      audio: {
+        data: new Uint8Array([1, 2, 3]),
+        format: "wav",
+        sampleRateHz: 24000
+      },
+      vendorResponse: {
+        status: "ok"
+      }
+    };
+
+    const result = await archive.writeVoiceCloneInstant({
+      runId: "run_instant_clone",
+      request,
+      plan,
+      providerResult
+    });
+    const files = await readdir(path.join(dataRoot, "runs", "run_instant_clone"));
+    const runs = await archive.listRuns();
+
+    expect(result.operation).toBe("voice.clone.instant");
+    expect(result.audio.fileName).toBe("audio.wav");
+    expect(files.sort()).toEqual([
+      "audio.wav",
+      "mapping-report.json",
+      "plan.json",
+      "request.json",
+      "result.json",
+      "vendor-request.json",
+      "vendor-response.json"
+    ]);
+    expect(runs[0]).toMatchObject({
+      runId: "run_instant_clone",
+      providerId: "xiaomi_mimo",
+      operation: "voice.clone.instant",
+      audio: {
+        fileName: "audio.wav"
+      }
+    });
   });
 
   it("uses plan metadata when listing legacy clone archives without run metadata", async () => {

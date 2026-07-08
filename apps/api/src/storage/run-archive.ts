@@ -7,6 +7,7 @@ import {
   type AudioArtifact,
   type MappingReport,
   type TTSOutputFormat,
+  type TTSOperationRequest,
   type TTSPlan,
   type TTSSyncPlan,
   type TTSSyncProviderResult,
@@ -15,6 +16,10 @@ import {
   type TTSStreamPlan,
   type TTSStreamRequest,
   type TTSStreamResult,
+  type VoiceCloneInstantPlan,
+  type VoiceCloneInstantProviderResult,
+  type VoiceCloneInstantRequest,
+  type VoiceCloneInstantResult,
   type VoiceClonePlan,
   type VoiceCloneRequest,
   type VoiceCloneResult,
@@ -47,6 +52,13 @@ export interface ArchiveVoiceCloneInput {
   runId?: string;
 }
 
+export interface ArchiveVoiceCloneInstantInput {
+  request: VoiceCloneInstantRequest;
+  plan: VoiceCloneInstantPlan;
+  providerResult: VoiceCloneInstantProviderResult;
+  runId?: string;
+}
+
 export interface ArchiveStreamRunInput {
   request: TTSStreamRequest;
   plan: TTSStreamPlan;
@@ -62,8 +74,8 @@ export interface ArchiveStreamRunInput {
 }
 
 export interface StoredRunDetail {
-  result: TTSSyncResult | TTSStreamResult;
-  request: TTSSyncRequest | TTSStreamRequest;
+  result: TTSSyncResult | TTSStreamResult | VoiceCloneInstantResult;
+  request: TTSOperationRequest;
   plan: TTSPlan;
   mappingReport: MappingReport;
   vendorRequest: VendorPayload;
@@ -146,6 +158,46 @@ export class FileRunArchive {
     return input.providerResult;
   }
 
+  // writeVoiceCloneInstant: 入参为即时音色复刻执行结果；功能是保存即时复刻请求、计划、映射、厂商请求响应和输出音频。
+  async writeVoiceCloneInstant(input: ArchiveVoiceCloneInstantInput): Promise<VoiceCloneInstantResult> {
+    const runId = input.runId ?? createRunId();
+    assertSafeRunId(runId);
+
+    const directory = runRoot(this.dataRoot, runId);
+    await mkdir(directory, { recursive: true });
+
+    const audioFileName = `audio.${input.providerResult.audio.format}`;
+    await writeFile(path.join(directory, audioFileName), input.providerResult.audio.data);
+
+    const result: VoiceCloneInstantResult = {
+      runId,
+      providerId: input.request.providerId,
+      operation: "voice.clone.instant",
+      status: "succeeded",
+      createdAt: new Date().toISOString(),
+      audio: {
+        fileName: audioFileName,
+        format: input.providerResult.audio.format,
+        sampleRateHz: input.providerResult.audio.sampleRateHz,
+        byteLength: input.providerResult.audio.data.byteLength,
+        url: `/v1/runs/${runId}/audio`
+      },
+      archive: {
+        runPath: `data/runs/${runId}`,
+        files: [...ARCHIVE_FILES, audioFileName]
+      }
+    };
+
+    await writePrettyJson(path.join(directory, "request.json"), input.request);
+    await writePrettyJson(path.join(directory, "plan.json"), input.plan);
+    await writePrettyJson(path.join(directory, "mapping-report.json"), input.plan.mappingReport);
+    await writePrettyJson(path.join(directory, "vendor-request.json"), input.plan.vendorRequest);
+    await writePrettyJson(path.join(directory, "vendor-response.json"), input.providerResult.vendorResponse);
+    await writePrettyJson(path.join(directory, "result.json"), result);
+
+    return result;
+  }
+
   // writeStreamRun: 入参为流式执行结果；功能是保存流式 request、plan、events、最终响应和拼接音频。
   async writeStreamRun(input: ArchiveStreamRunInput): Promise<TTSStreamResult> {
     const runId = input.runId ?? createRunId();
@@ -222,8 +274,8 @@ export class FileRunArchive {
     await assertRunExists(directory, runId);
 
     const [result, request, plan, mappingReport, vendorRequest, vendorResponse] = await Promise.all([
-      readJsonFile<TTSSyncResult | TTSStreamResult>(path.join(directory, "result.json")),
-      readJsonFile<TTSSyncRequest | TTSStreamRequest>(path.join(directory, "request.json")),
+      readJsonFile<TTSSyncResult | TTSStreamResult | VoiceCloneInstantResult>(path.join(directory, "result.json")),
+      readJsonFile<TTSOperationRequest>(path.join(directory, "request.json")),
       readJsonFile<TTSPlan>(path.join(directory, "plan.json")),
       readJsonFile<MappingReport>(path.join(directory, "mapping-report.json")),
       readJsonFile<VendorPayload>(path.join(directory, "vendor-request.json")),

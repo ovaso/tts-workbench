@@ -87,6 +87,7 @@ export interface VoiceCloneInstantRequest {
   operation: "voice.clone.instant";
   providerId: string;
   text: string;
+  model?: string;
   language?: string;
   referenceAudio: ReferenceAudio[];
   output?: TTSOutputPreferences;

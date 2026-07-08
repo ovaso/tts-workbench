@@ -4,6 +4,7 @@ import {
   isTTSOperation,
   type TTSAdapter,
   type TTSStreamEvent,
+  type VoiceCloneInstantPlan,
   type VoiceClonePlan,
   type TTSSyncRequest,
   type TTSStreamRequest,
@@ -264,5 +265,68 @@ describe("core contracts", () => {
 
     expect(event.type).toBe("audio.chunk");
     expect(event.format).toBe("mp3");
+  });
+
+  it("requires instant clone execution to return generated audio from a planned request", async () => {
+    const executeInstantClone: NonNullable<TTSAdapter["createInstantVoiceClone"]> = async (_plan) => ({
+      audio: {
+        data: new Uint8Array([1, 2, 3]),
+        format: "wav",
+        sampleRateHz: 24000
+      },
+      vendorResponse: {
+        status: "ok"
+      }
+    });
+
+    const plan: VoiceCloneInstantPlan = {
+      planId: "plan_instant",
+      providerId: "instant-clone",
+      adapterVersion: "0.0.0",
+      operation: "voice.clone.instant",
+      createdAt: new Date(0).toISOString(),
+      capabilitySnapshot: {
+        providerId: "instant-clone",
+        providerName: "Instant Clone",
+        adapterVersion: "0.0.0",
+        vendorFeatures: {
+          supportsHttpTTS: true,
+          supportsStreamingTTS: false,
+          supportsPersistentVoiceClone: false,
+          supportsInstantVoiceClone: true,
+          supportsVoiceCloneDelete: false
+        },
+        vendorModels: [],
+        operations: {}
+      },
+      canonicalRequest: {
+        operation: "voice.clone.instant",
+        providerId: "instant-clone",
+        text: "hello",
+        referenceAudio: [
+          {
+            uri: "data:audio/mpeg;base64,AQID"
+          }
+        ]
+      },
+      vendorRequest: {},
+      mappingReport: {
+        providerId: "instant-clone",
+        operation: "voice.clone.instant",
+        directiveMode: "prefer_vendor",
+        appliedCanonicalFields: [],
+        appliedVendorExtensions: [],
+        ignoredFields: [],
+        approximations: [],
+        warnings: []
+      }
+    };
+
+    await expect(executeInstantClone(plan)).resolves.toMatchObject({
+      audio: {
+        format: "wav",
+        sampleRateHz: 24000
+      }
+    });
   });
 });

@@ -1,0 +1,26 @@
+{
+  "operation": "tts.sync",
+  "providerId": "xiaomi_mimo",
+  "text": "Hey boss, I just got the results back and I passed.",
+  "model": "mimo-v2.5-tts",
+  "voice": {
+    "providerVoiceId": "Chloe"
+  },
+  "output": {
+    "format": "wav",
+    "sampleRateHz": 24000,
+    "channels": 1
+  },
+  "vendor": {
+    "mode": "prefer_vendor",
+    "extensions": {
+      "xiaomi_mimo": {
+        "schemaVersion": "1.0.0",
+        "params": {
+          "stylePrompt": "Bright, upbeat, slightly fast.",
+          "assistantPrefix": "(开心)"
+        }
+      }
+    }
+  }
+}
