@@ -507,6 +507,144 @@ describe("api app", () => {
     expect(detailResponse.json().planId).toBe(planResponse.json().plan.planId);
   });
 
+  it("filters corpus items, returns corpus stats, and expands corpus sets over HTTP", async () => {
+    const supportResponse = await app.inject({
+      method: "POST",
+      url: "/v1/corpus-items",
+      payload: {
+        title: "客服问候",
+        text: "您好，请问有什么可以帮您？",
+        language: "zh-CN",
+        scene: "support",
+        emotion: "neutral",
+        styleTags: ["formal"],
+        ssml: "<speak>您好，请问有什么可以帮您？</speak>"
+      }
+    });
+    await app.inject({
+      method: "POST",
+      url: "/v1/corpus-items",
+      payload: {
+        title: "广告短句",
+        text: "新品限时优惠。",
+        language: "zh-CN",
+        scene: "ad",
+        emotion: "happy",
+        styleTags: ["energetic"]
+      }
+    });
+
+    const listResponse = await app.inject({
+      method: "GET",
+      url: "/v1/corpus-items?language=zh-CN&scene=support&styleTags=formal&ssmlEnabled=true"
+    });
+    const statsResponse = await app.inject({
+      method: "GET",
+      url: "/v1/corpus-stats?language=zh-CN"
+    });
+    const setResponse = await app.inject({
+      method: "POST",
+      url: "/v1/corpus-sets",
+      payload: {
+        name: "中文客服",
+        filtersSnapshot: {
+          language: "zh-CN",
+          scene: "support"
+        }
+      }
+    });
+    const detailResponse = await app.inject({
+      method: "GET",
+      url: `/v1/corpus-sets/${setResponse.json().set.corpusSetId}`
+    });
+
+    expect(listResponse.statusCode).toBe(200);
+    expect(listResponse.json().items.map((item: { corpusItemId: string }) => item.corpusItemId)).toEqual([
+      supportResponse.json().item.corpusItemId
+    ]);
+    expect(statsResponse.statusCode).toBe(200);
+    expect(statsResponse.json().stats).toMatchObject({
+      itemCount: 2,
+      ssmlEnabledCount: 1
+    });
+    expect(setResponse.statusCode).toBe(201);
+    expect(setResponse.json().set.corpusItemIds).toEqual([supportResponse.json().item.corpusItemId]);
+    expect(detailResponse.statusCode).toBe(200);
+    expect(detailResponse.json().items[0]).toMatchObject({
+      title: "客服问候",
+      language: "zh-CN"
+    });
+  });
+
+  it("updates and deletes corpus items over HTTP", async () => {
+    const createResponse = await app.inject({
+      method: "POST",
+      url: "/v1/corpus-items",
+      payload: {
+        title: "Draft",
+        text: "hello",
+        language: "en-US",
+        scene: "support"
+      }
+    });
+    const itemId = createResponse.json().item.corpusItemId;
+
+    const updateResponse = await app.inject({
+      method: "PATCH",
+      url: `/v1/corpus-items/${itemId}`,
+      payload: {
+        title: "Updated",
+        scene: "",
+        styleTags: ["formal"],
+        ssmlEnabled: true,
+        ssml: "<speak>hello</speak>"
+      }
+    });
+    const detailResponse = await app.inject({
+      method: "GET",
+      url: `/v1/corpus-items/${itemId}`
+    });
+    const setResponse = await app.inject({
+      method: "POST",
+      url: "/v1/corpus-sets",
+      payload: {
+        name: "Referenced",
+        corpusItemIds: [itemId]
+      }
+    });
+    const blockedDeleteResponse = await app.inject({
+      method: "DELETE",
+      url: `/v1/corpus-items/${itemId}`
+    });
+    const looseResponse = await app.inject({
+      method: "POST",
+      url: "/v1/corpus-items",
+      payload: {
+        title: "Loose",
+        text: "remove me",
+        language: "en-US"
+      }
+    });
+    const deleteResponse = await app.inject({
+      method: "DELETE",
+      url: `/v1/corpus-items/${looseResponse.json().item.corpusItemId}`
+    });
+
+    expect(updateResponse.statusCode).toBe(200);
+    expect(updateResponse.json().item).toMatchObject({
+      title: "Updated",
+      styleTags: ["formal"],
+      ssmlEnabled: true
+    });
+    expect(updateResponse.json().item.scene).toBeUndefined();
+    expect(detailResponse.json().title).toBe("Updated");
+    expect(setResponse.statusCode).toBe(201);
+    expect(blockedDeleteResponse.statusCode).toBe(409);
+    expect(blockedDeleteResponse.json().error.details.corpusSetIds).toEqual([setResponse.json().set.corpusSetId]);
+    expect(deleteResponse.statusCode).toBe(200);
+    expect(deleteResponse.json().item.title).toBe("Loose");
+  });
+
   it("resolves local voice ids without changing the requested synthesis model", async () => {
     const dataRoot = await mkdtemp(path.join(os.tmpdir(), "tts-api-voices-"));
     await mkdir(path.join(dataRoot, "voices"), { recursive: true });

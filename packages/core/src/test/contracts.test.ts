@@ -5,6 +5,10 @@ import {
   type BenchmarkPlan,
   type BenchConfigSet,
   type CorpusItem,
+  type CorpusItemQuery,
+  type CorpusItemUpdateRequest,
+  type CorpusSetCreateRequest,
+  type CorpusStats,
   type TTSAdapter,
   type TTSStreamEvent,
   type VoiceCloneInstantPlan,
@@ -123,6 +127,57 @@ describe("core contracts", () => {
     expect(plan.jobs[0]?.request.operation).toBe("tts.sync");
     expect(plan.jobs[0]?.request.ssml).toContain("speak");
     expect(plan.summary.totalJobs).toBe(1);
+  });
+
+  it("models corpus filtering and filter-backed set creation contracts", () => {
+    const query: CorpusItemQuery = {
+      search: "客服",
+      language: "zh-CN",
+      scene: "support",
+      lengthCategory: "short",
+      styleTags: ["formal"],
+      ssmlEnabled: true
+    };
+    const request: CorpusSetCreateRequest = {
+      name: "中文客服",
+      filtersSnapshot: query
+    };
+    const stats: CorpusStats = {
+      itemCount: 1,
+      setCount: 1,
+      ssmlEnabledCount: 1,
+      byLanguage: [
+        {
+          value: "zh-CN",
+          count: 1
+        }
+      ],
+      byScene: [],
+      byEmotion: [],
+      byLengthCategory: [
+        {
+          value: "short",
+          count: 1
+        }
+      ],
+      byStyleTag: []
+    };
+
+    expect(request.filtersSnapshot?.search).toBe("客服");
+    expect(stats.byLengthCategory[0]?.value).toBe(query.lengthCategory);
+  });
+
+  it("models corpus item updates without replacing the whole record", () => {
+    const request: CorpusItemUpdateRequest = {
+      title: "客服问候更新",
+      scene: "",
+      styleTags: ["formal", "warm"],
+      ssmlEnabled: false
+    };
+
+    expect(request.title).toContain("更新");
+    expect(request.scene).toBe("");
+    expect(request.ssmlEnabled).toBe(false);
   });
 
   it("requires adapters to declare vendor-owned feature flags", () => {

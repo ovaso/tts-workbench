@@ -6,9 +6,14 @@ import {
   type CorpusFilterSnapshot,
   type CorpusItem,
   type CorpusItemCreateRequest,
+  type CorpusItemQuery,
+  type CorpusItemUpdateRequest,
   type CorpusLengthCategory,
   type CorpusSet,
-  type CorpusSetCreateRequest
+  type CorpusSetCreateRequest,
+  type CorpusSetExpanded,
+  type CorpusStats,
+  type CorpusValueCount
 } from "@tts-platform/core";
 import { datasetsRoot, defaultDataRoot } from "./paths";
 
@@ -26,14 +31,35 @@ export class FileCorpusRegistry {
     this.load();
   }
 
-  // listItems: 无入参；输出按创建时间倒序排列的语料记录。
-  listItems(): CorpusItem[] {
-    return [...this.items.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  // listItems: 入参为可选查询条件；输出按创建时间倒序排列且命中筛选的语料记录。
+  listItems(query: CorpusItemQuery = {}): CorpusItem[] {
+    const normalizedQuery = normalizeItemQuery(query);
+    return [...this.items.values()]
+      .filter((item) => matchesItemQuery(item, normalizedQuery))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
   // getItem: 入参为语料 id；输出对应语料，缺失时返回 undefined。
   getItem(corpusItemId: string): CorpusItem | undefined {
     return this.items.get(corpusItemId);
+  }
+
+  // stats: 入参为可选查询条件；输出命中语料的多维度聚合统计。
+  stats(query: CorpusItemQuery = {}): CorpusStats {
+    const items = this.listItems(query);
+    return {
+      itemCount: items.length,
+      setCount: this.sets.size,
+      ssmlEnabledCount: items.filter((item) => item.ssmlEnabled).length,
+      byLanguage: countValues(items, (item) => item.language),
+      byScene: countValues(items, (item) => item.scene),
+      byEmotion: countValues(items, (item) => item.emotion),
+      byLengthCategory: countValues(items, (item) => item.lengthCategory, ["short", "medium", "long"]),
+      byStyleTag: countValues(
+        items.flatMap((item) => item.styleTags),
+        (tag) => tag
+      )
+    };
   }
 
   // saveItem: 入参为语料创建请求；输出补齐 id 和时间戳后的语料记录。
@@ -60,6 +86,59 @@ export class FileCorpusRegistry {
     return item;
   }
 
+  // updateItem: 入参为语料 id 和更新请求；输出更新后的语料记录，缺失时抛出 404。
+  updateItem(corpusItemId: string, request: CorpusItemUpdateRequest): CorpusItem {
+    const current = this.items.get(corpusItemId);
+    if (current === undefined) {
+      throw new TTSError(`Corpus item '${corpusItemId}' was not found.`, "invalid_request", 404);
+    }
+
+    const text = request.text ?? current.text;
+    const ssml = resolveOptionalTextField(current.ssml, request.ssml);
+    const ssmlEnabled = request.ssmlEnabled ?? current.ssmlEnabled;
+    if (ssmlEnabled && ssml === undefined) {
+      throw new TTSError("ssml is required when ssmlEnabled is true.", "invalid_request", 400);
+    }
+
+    const updated: CorpusItem = {
+      corpusItemId: current.corpusItemId,
+      title: request.title ?? current.title,
+      text,
+      language: request.language ?? current.language,
+      lengthCategory: request.lengthCategory ?? current.lengthCategory,
+      styleTags: request.styleTags === undefined ? current.styleTags : normalizeTags(request.styleTags),
+      ssmlEnabled,
+      createdAt: current.createdAt,
+      updatedAt: new Date().toISOString(),
+      ...optionalTextField("scene", resolveOptionalTextField(current.scene, request.scene)),
+      ...optionalTextField("emotion", resolveOptionalTextField(current.emotion, request.emotion)),
+      ...optionalTextField("ssml", ssmlEnabled ? ssml : undefined),
+      ...optionalTextField("notes", resolveOptionalTextField(current.notes, request.notes))
+    };
+
+    this.items.set(corpusItemId, updated);
+    this.persistItems();
+    return updated;
+  }
+
+  // deleteItem: 入参为语料 id；输出被删除的语料记录，被组合引用时拒绝删除。
+  deleteItem(corpusItemId: string): CorpusItem {
+    const item = this.items.get(corpusItemId);
+    if (item === undefined) {
+      throw new TTSError(`Corpus item '${corpusItemId}' was not found.`, "invalid_request", 404);
+    }
+    const referencingSets = this.listSets().filter((set) => set.corpusItemIds.includes(corpusItemId));
+    if (referencingSets.length > 0) {
+      throw new TTSError("Corpus item is referenced by corpus sets.", "invalid_request", 409, {
+        corpusSetIds: referencingSets.map((set) => set.corpusSetId)
+      });
+    }
+
+    this.items.delete(corpusItemId);
+    this.persistItems();
+    return item;
+  }
+
   // listSets: 无入参；输出按创建时间倒序排列的语料组合。
   listSets(): CorpusSet[] {
     return [...this.sets.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
@@ -70,9 +149,32 @@ export class FileCorpusRegistry {
     return this.sets.get(corpusSetId);
   }
 
+  // getExpandedSet: 入参为语料组合 id；输出组合及其当前可解析的语料条目。
+  getExpandedSet(corpusSetId: string): CorpusSetExpanded | undefined {
+    const set = this.sets.get(corpusSetId);
+    if (set === undefined) {
+      return undefined;
+    }
+    return {
+      ...set,
+      items: set.corpusItemIds.flatMap((corpusItemId) => {
+        const item = this.items.get(corpusItemId);
+        return item === undefined ? [] : [item];
+      })
+    };
+  }
+
   // saveSet: 入参为语料组合创建请求；输出补齐 id 和时间戳后的语料组合。
   saveSet(request: CorpusSetCreateRequest): CorpusSet {
-    const corpusItemIds = uniqueStrings(request.corpusItemIds);
+    const filtersSnapshot =
+      request.filtersSnapshot === undefined ? undefined : normalizeFilterSnapshot(request.filtersSnapshot);
+    const explicitItemIds = uniqueStrings(request.corpusItemIds ?? []);
+    const corpusItemIds =
+      explicitItemIds.length > 0
+        ? explicitItemIds
+        : filtersSnapshot === undefined
+          ? []
+          : this.listItems(filtersSnapshot).map((item) => item.corpusItemId);
     if (corpusItemIds.length === 0) {
       throw new TTSError("corpusItemIds must contain at least one item.", "invalid_request", 400);
     }
@@ -90,7 +192,7 @@ export class FileCorpusRegistry {
       createdAt: now,
       updatedAt: now,
       ...(request.description === undefined ? {} : { description: request.description }),
-      ...(request.filtersSnapshot === undefined ? {} : { filtersSnapshot: normalizeFilterSnapshot(request.filtersSnapshot) })
+      ...(filtersSnapshot === undefined ? {} : { filtersSnapshot })
     };
 
     this.sets.set(set.corpusSetId, set);
@@ -152,13 +254,113 @@ function normalizeTags(tags: string[] | undefined): string[] {
 
 // normalizeFilterSnapshot: 入参为筛选条件快照；输出去除空白标签后的快照。
 function normalizeFilterSnapshot(snapshot: CorpusFilterSnapshot): CorpusFilterSnapshot {
+  const query = normalizeItemQuery(snapshot);
   return {
-    ...(snapshot.language === undefined ? {} : { language: snapshot.language }),
-    ...(snapshot.scene === undefined ? {} : { scene: snapshot.scene }),
-    ...(snapshot.emotion === undefined ? {} : { emotion: snapshot.emotion }),
-    ...(snapshot.lengthCategory === undefined ? {} : { lengthCategory: snapshot.lengthCategory }),
-    ...(snapshot.styleTags === undefined ? {} : { styleTags: normalizeTags(snapshot.styleTags) })
+    ...(query.search === undefined ? {} : { search: query.search }),
+    ...(query.language === undefined ? {} : { language: query.language }),
+    ...(query.scene === undefined ? {} : { scene: query.scene }),
+    ...(query.emotion === undefined ? {} : { emotion: query.emotion }),
+    ...(query.lengthCategory === undefined ? {} : { lengthCategory: query.lengthCategory }),
+    ...(query.styleTags === undefined ? {} : { styleTags: query.styleTags }),
+    ...(query.ssmlEnabled === undefined ? {} : { ssmlEnabled: query.ssmlEnabled })
   };
+}
+
+// resolveOptionalTextField: 入参为当前值和可选更新值；输出保留、更新或清空后的字段值。
+function resolveOptionalTextField(current: string | undefined, next: string | undefined): string | undefined {
+  if (next === undefined) {
+    return current;
+  }
+  const normalized = next.trim();
+  return normalized.length === 0 ? undefined : normalized;
+}
+
+// optionalTextField: 入参为字段名和值；输出仅包含非空文本字段的局部对象。
+function optionalTextField<TKey extends "scene" | "emotion" | "ssml" | "notes">(
+  key: TKey,
+  value: string | undefined
+): Partial<Record<TKey, string>> {
+  return value === undefined ? {} : { [key]: value } as Partial<Record<TKey, string>>;
+}
+
+// normalizeItemQuery: 入参为语料查询条件；输出去空白、去空数组后的标准查询对象。
+function normalizeItemQuery(query: CorpusItemQuery): CorpusItemQuery {
+  const styleTags = normalizeTags(query.styleTags);
+  return {
+    ...(query.search === undefined || query.search.trim().length === 0 ? {} : { search: query.search.trim() }),
+    ...(query.language === undefined || query.language.trim().length === 0 ? {} : { language: query.language.trim() }),
+    ...(query.scene === undefined || query.scene.trim().length === 0 ? {} : { scene: query.scene.trim() }),
+    ...(query.emotion === undefined || query.emotion.trim().length === 0 ? {} : { emotion: query.emotion.trim() }),
+    ...(query.lengthCategory === undefined ? {} : { lengthCategory: query.lengthCategory }),
+    ...(styleTags.length === 0 ? {} : { styleTags }),
+    ...(query.ssmlEnabled === undefined ? {} : { ssmlEnabled: query.ssmlEnabled })
+  };
+}
+
+// matchesItemQuery: 入参为语料记录和查询条件；输出该记录是否满足所有筛选条件。
+function matchesItemQuery(item: CorpusItem, query: CorpusItemQuery): boolean {
+  if (query.search !== undefined && !matchesSearch(item, query.search)) {
+    return false;
+  }
+  if (query.language !== undefined && !equalsFacet(item.language, query.language)) {
+    return false;
+  }
+  if (query.scene !== undefined && !equalsFacet(item.scene, query.scene)) {
+    return false;
+  }
+  if (query.emotion !== undefined && !equalsFacet(item.emotion, query.emotion)) {
+    return false;
+  }
+  if (query.lengthCategory !== undefined && item.lengthCategory !== query.lengthCategory) {
+    return false;
+  }
+  if (query.ssmlEnabled !== undefined && item.ssmlEnabled !== query.ssmlEnabled) {
+    return false;
+  }
+  if (query.styleTags !== undefined && !containsAllTags(item.styleTags, query.styleTags)) {
+    return false;
+  }
+  return true;
+}
+
+// matchesSearch: 入参为语料记录和搜索词；输出搜索词是否命中标题、正文、备注或标签。
+function matchesSearch(item: CorpusItem, search: string): boolean {
+  const needle = search.toLocaleLowerCase();
+  return [item.title, item.text, item.notes ?? "", ...item.styleTags].some((value) =>
+    value.toLocaleLowerCase().includes(needle)
+  );
+}
+
+// equalsFacet: 入参为语料维度值和查询值；输出大小写不敏感的相等判断结果。
+function equalsFacet(value: string | undefined, expected: string): boolean {
+  return value !== undefined && value.toLocaleLowerCase() === expected.toLocaleLowerCase();
+}
+
+// containsAllTags: 入参为语料标签和查询标签；输出语料是否包含全部查询标签。
+function containsAllTags(itemTags: string[], expectedTags: string[]): boolean {
+  const normalizedItemTags = new Set(itemTags.map((tag) => tag.toLocaleLowerCase()));
+  return expectedTags.every((tag) => normalizedItemTags.has(tag.toLocaleLowerCase()));
+}
+
+// countValues: 入参为数据列表、取值函数和可选排序顺序；输出非空值的计数列表。
+function countValues<TItem, TValue extends string>(
+  items: TItem[],
+  pickValue: (item: TItem) => TValue | undefined,
+  order?: TValue[]
+): Array<CorpusValueCount<TValue>> {
+  const counts = new Map<TValue, number>();
+  for (const item of items) {
+    const value = pickValue(item);
+    if (value === undefined || value.length === 0) {
+      continue;
+    }
+    counts.set(value, (counts.get(value) ?? 0) + 1);
+  }
+  const values = [...counts.entries()].map(([value, count]) => ({ value, count }));
+  if (order !== undefined) {
+    return values.sort((left, right) => order.indexOf(left.value) - order.indexOf(right.value));
+  }
+  return values.sort((left, right) => right.count - left.count || left.value.localeCompare(right.value));
 }
 
 // uniqueStrings: 入参为字符串数组；输出 trim 后保持首次出现顺序的唯一字符串数组。
