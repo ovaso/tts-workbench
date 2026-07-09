@@ -13,12 +13,11 @@ const doubaoResourceIds = [...doubaoCloneResourceIds, ...doubaoTtsResourceIds] a
 const outputFormats = ["mp3", "pcm", "opus"] as const;
 const sampleRatesHz = [8000, 16000, 22050, 24000, 32000, 44100, 48000] as const;
 
-// doubaoSameResourcePolicy: 豆包复刻音色必须匹配 X-Api-Resource-Id，能力声明在 provider/model/operation 三层复用。
-const doubaoSameResourcePolicy: VoiceCompatibilityPolicy = {
-  kind: "same_resource",
-  enforcedBy: "vendor",
-  resourceKind: "clone_resource",
-  notes: ["复刻音色合成时必须用匹配的 X-Api-Resource-Id。"]
+// doubaoProviderWidePolicy: 豆包音色 ID 归属于厂商账号；ICL 只用于创建音色，TTS 合成 resource 由合成模型决定。
+const doubaoProviderWidePolicy: VoiceCompatibilityPolicy = {
+  kind: "provider_wide",
+  enforcedBy: "none",
+  notes: ["声音复刻模型只用于创建音色；合成时使用 seed-tts 系列 Resource Id 和既有 speaker id。"]
 };
 
 // doubaoModel: 入参为豆包 Resource Id；输出模型级 capability，按 operation 区分复刻模型和合成模型。
@@ -39,12 +38,12 @@ function doubaoModel(resourceId: (typeof doubaoResourceIds)[number]): TTSVendorM
           requiresTranscript: false,
           supportedAudioFormats: ["wav", "mp3", "m4a", "pcm"],
           maxReferenceAudioFiles: 1,
-          resultCompatibility: doubaoSameResourcePolicy
+          resultCompatibility: doubaoProviderWidePolicy
         }
       },
-      voiceCompatibilityPolicy: doubaoSameResourcePolicy,
+      voiceCompatibilityPolicy: doubaoProviderWidePolicy,
       vendorModelFeatureSchema: doubaoExtensionSchema("voice.clone.create"),
-      notes: ["seed-icl 系列只作为声音复刻模型；复刻后的音色按厂商级资源管理，可在豆包 TTS 合成模型中选择使用。"]
+      notes: ["seed-icl 系列只作为声音复刻模型；复刻后的音色按厂商级资源管理，合成时仍使用 seed-tts 系列资源。"]
     };
   }
 
@@ -61,9 +60,9 @@ function doubaoModel(resourceId: (typeof doubaoResourceIds)[number]): TTSVendorM
       sampleRatesHz: [...sampleRatesHz],
       maxTextChars: 10000,
       canonicalControls: doubaoCanonicalControls(),
-      voiceCompatibilityPolicy: doubaoSameResourcePolicy
+      voiceCompatibilityPolicy: doubaoProviderWidePolicy
     },
-    voiceCompatibilityPolicy: doubaoSameResourcePolicy,
+    voiceCompatibilityPolicy: doubaoProviderWidePolicy,
     defaultConfiguration: {
       output: {
         format: "mp3",
@@ -115,7 +114,7 @@ export function doubaoCapabilities(adapterVersion = DOUBAO_ADAPTER_VERSION): TTS
     providerId: DOUBAO_PROVIDER_ID,
     providerName: "Doubao",
     adapterVersion,
-    voiceCompatibilityPolicy: doubaoSameResourcePolicy,
+    voiceCompatibilityPolicy: doubaoProviderWidePolicy,
     vendorFeatures: {
       supportsHttpTTS: true,
       supportsStreamingTTS: true,
@@ -132,7 +131,7 @@ export function doubaoCapabilities(adapterVersion = DOUBAO_ADAPTER_VERSION): TTS
         outputFormats: [...outputFormats],
         sampleRatesHz: [...sampleRatesHz],
         maxTextChars: 10000,
-        voiceCompatibilityPolicy: doubaoSameResourcePolicy,
+        voiceCompatibilityPolicy: doubaoProviderWidePolicy,
         canonicalControls: defaultControls,
         vendorExtensionSchema: doubaoExtensionSchema("tts.sync"),
         notes: ["当前 adapter 通过豆包 SSE 接口聚合所有音频片段，形成同步合成结果。"]
@@ -147,7 +146,7 @@ export function doubaoCapabilities(adapterVersion = DOUBAO_ADAPTER_VERSION): TTS
         sampleRatesHz: [...sampleRatesHz],
         supportsTimestamps: true,
         supportsInterruption: false,
-        voiceCompatibilityPolicy: doubaoSameResourcePolicy,
+        voiceCompatibilityPolicy: doubaoProviderWidePolicy,
         canonicalControls: defaultControls,
         vendorExtensionSchema: doubaoExtensionSchema("tts.stream")
       },
@@ -160,7 +159,7 @@ export function doubaoCapabilities(adapterVersion = DOUBAO_ADAPTER_VERSION): TTS
           requiresTranscript: false,
           supportedAudioFormats: ["wav", "mp3", "m4a", "pcm"],
           maxReferenceAudioFiles: 1,
-          resultCompatibility: doubaoSameResourcePolicy
+          resultCompatibility: doubaoProviderWidePolicy
         },
         canonicalControls: {},
         vendorExtensionSchema: doubaoExtensionSchema("voice.clone.create"),

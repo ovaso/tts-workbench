@@ -625,6 +625,58 @@ describe("api app", () => {
       await voiceApp.close();
     }
   });
+
+  it("normalizes legacy Doubao resource-bound voices to provider-wide compatibility", async () => {
+    const dataRoot = await mkdtemp(path.join(os.tmpdir(), "tts-api-doubao-voice-compat-"));
+    await mkdir(path.join(dataRoot, "voices"), { recursive: true });
+    await writeFile(
+      path.join(dataRoot, "voices", "voices.json"),
+      `${JSON.stringify(
+        {
+          voices: [
+            {
+              voiceId: "doubao:doubao_seed-icl-2.0_S_D3lMr9g32",
+              providerId: "doubao",
+              providerVoiceId: "doubao_seed-icl-2.0_S_D3lMr9g32",
+              displayName: "Legacy Doubao Voice",
+              source: "cloned",
+              createdAt: "2026-07-09T00:00:00.000Z",
+              compatibility: {
+                scope: "resource",
+                enforced: true,
+                resourceIds: ["seed-icl-2.0"],
+                resourceKind: "clone_resource",
+                vendorField: "resourceId",
+                compatibleModelIds: ["seed-tts-2.0"]
+              }
+            }
+          ]
+        },
+        null,
+        2
+      )}\n`
+    );
+    const voiceApp = await buildApp({
+      dataRoot,
+      loadEnv: false
+    });
+
+    try {
+      const response = await voiceApp.inject({
+        method: "GET",
+        url: "/v1/voices?providerId=doubao"
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json().voices[0].compatibility).toMatchObject({
+        scope: "provider",
+        enforced: false,
+        preferredModelIds: ["seed-tts-2.0"]
+      });
+    } finally {
+      await voiceApp.close();
+    }
+  });
 });
 
 function collectWebSocketStream(ws: WebSocket): Promise<{

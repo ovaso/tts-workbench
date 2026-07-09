@@ -209,7 +209,7 @@ export class TTSFacade {
   private withAdapterVoiceCompatibility(voice: VoiceRecord): VoiceRecord {
     const adapter = this.registry.get(voice.providerId);
     const compatibility = adapter?.voiceCompatibility?.(voice) ?? voice.compatibility;
-    if (compatibility === undefined || voice.compatibility !== undefined) {
+    if (compatibility === undefined) {
       return voice;
     }
     return {

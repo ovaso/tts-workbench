@@ -7,9 +7,9 @@
 - Default TTS Resource Id: `seed-tts-2.0`
 - Default voice clone Resource Id: `seed-icl-2.0`
 - `seed-tts-*` 系列用于普通 TTS 音色合成资源。
-- `seed-icl-*` 系列用于声音复刻创建，也用于复刻音色后续合成时的 `X-Api-Resource-Id`。
-- 平台内的受控音色会记录 `compatibility.scope=resource`，用于把 speaker 与 `X-Api-Resource-Id` 匹配起来。
-- TTS 请求中的 `req_params.model` 是复刻 2.0 的厂商子模型参数，默认 `seed-tts-2.0-standard`。
+- `seed-icl-*` 系列只用于声音复刻创建，不用于 TTS 合成请求的 `X-Api-Resource-Id`。
+- 平台内的受控音色按厂商级音色处理；音色 ID 已存在后，TTS 合成保持 speaker 不变，并由所选 `seed-tts-*` 模型决定 `X-Api-Resource-Id`。
+- TTS 请求中的 `req_params.model` 是厂商请求体里的表现模型参数，默认 `seed-tts-2.0-standard`；不要和 `X-Api-Resource-Id` 混淆。
 - Base URL: `https://openspeech.bytedance.com`
 
 ## Environment
@@ -45,7 +45,7 @@ DOUBAO_ACCESS_TOKEN=your-access-token
 POST /api/v3/tts/unidirectional/sse HTTP/1.1
 Content-Type: application/json
 X-Api-Key: ${DOUBAO_API_KEY}
-X-Api-Resource-Id: seed-icl-2.0
+X-Api-Resource-Id: seed-tts-2.0
 X-Api-Request-Id: ${planId}
 ```
 
@@ -82,8 +82,8 @@ Body:
 
 | Canonical field | Doubao field |
 | --- | --- |
-| `model` | 普通音色场景下映射到 `X-Api-Resource-Id` |
-| `voice.compatibility.resourceIds[0]` | 复刻音色场景下优先映射到 `X-Api-Resource-Id` |
+| `model` | 映射到 `X-Api-Resource-Id`，只允许 `seed-tts-*` 合成资源 |
+| `voice.compatibility.resourceIds` | 历史 ICL 兼容字段会被忽略，不能覆盖 TTS 合成 resource |
 | `text` | `req_params.text` |
 | `ssml` | `req_params.ssml` |
 | `voice.providerVoiceId` | `req_params.speaker` |
@@ -108,7 +108,7 @@ Unsupported canonical fields are recorded in `mappingReport.ignoredFields`.
         "params": {
           "uid": "tenant-or-user-id",
           "namespace": "BidirectionalTTS",
-          "resourceId": "seed-icl-2.0",
+          "resourceId": "seed-tts-2.0",
           "ttsModel": "seed-tts-2.0-standard",
           "additions": {
             "enable_language_detector": true
@@ -125,6 +125,10 @@ Unsupported canonical fields are recorded in `mappingReport.ignoredFields`.
 ```
 
 `canonical_only` ignores all vendor extension fields. `vendor_required` fails during planning when the extension is absent.
+
+`resourceId` maps to `X-Api-Resource-Id` only when it is a `seed-tts-*` TTS resource. `seed-icl-*` clone resources are recorded in `mappingReport.ignoredFields` and are not sent to the synthesis endpoint.
+
+`emotionScale` maps to `req_params.audio_params.emotion_scale` and must be within `1` to `5`. Values outside this range are recorded in `mappingReport.ignoredFields` and are not sent to Doubao.
 
 ### SSE Events
 
@@ -160,6 +164,12 @@ data: {"code":20000000,"message":"OK","data":null,"usage":{"text_words":11}}
 ```
 
 Any `code` outside `0` and `20000000` is treated as `vendor_execution_failed`.
+
+When Doubao returns `55000000: resource ID is mismatched with speaker related resource` or a resource-related `45000000`, the adapter adds `details.diagnostic` to the thrown `TTSError`. The diagnostic includes the planned `resourceId`, `speaker`, `ttsModel`, and next steps:
+
+- confirm that `req_params.speaker` is the real Doubao `speaker_id` or `custom_speaker_id`;
+- confirm that `X-Api-Resource-Id` is a `seed-tts-*` synthesis resource, not a `seed-icl-*` clone resource;
+- query `/api/v3/tts/get_voice` for `status` and account ownership when the speaker is still rejected.
 
 ## Voice Clone Contract
 
