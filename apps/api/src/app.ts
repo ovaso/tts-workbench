@@ -13,6 +13,7 @@ import { loadEnvFiles } from "./config/env";
 import { registerBenchConfigRoutes } from "./routes/bench-configs";
 import { registerHealthRoutes } from "./routes/health";
 import { registerProviderRoutes } from "./routes/providers";
+import { registerRealtimeSimulatorRoutes } from "./routes/realtime-simulator";
 import { registerRunRoutes } from "./routes/runs";
 import { registerSynthesizeRoutes } from "./routes/synthesize";
 import { FileRunArchive } from "./storage/run-archive";
@@ -109,6 +110,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await registerHealthRoutes(app);
   await registerProviderRoutes(app, facade);
   await registerSynthesizeRoutes(app, facade, archive, streamSessions);
+  // registerRealtimeSimulatorRoutes: 独立注册 FreeSWITCH 代理仿真桥接，不经过 core、Facade 或 run archive。
+  await registerRealtimeSimulatorRoutes(app);
   await registerRunRoutes(app, archive);
   await registerBenchConfigRoutes(app, benchConfigs);
 

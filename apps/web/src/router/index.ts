@@ -3,6 +3,7 @@ import ArenaPage from "../pages/ArenaPage.vue";
 import BenchesPage from "../pages/BenchesPage.vue";
 import CorporaPage from "../pages/CorporaPage.vue";
 import ProvidersPage from "../pages/ProvidersPage.vue";
+import RealtimeSimulatorPage from "../pages/RealtimeSimulatorPage.vue";
 import RunDetailPage from "../pages/RunDetailPage.vue";
 import RunsPage from "../pages/RunsPage.vue";
 import SynthesizePage from "../pages/SynthesizePage.vue";
@@ -24,6 +25,11 @@ export const router = createRouter({
       path: "/synthesize",
       name: "synthesize",
       component: SynthesizePage
+    },
+    {
+      path: "/realtime-simulator",
+      name: "realtime-simulator",
+      component: RealtimeSimulatorPage
     },
     {
       path: "/voice-clone",

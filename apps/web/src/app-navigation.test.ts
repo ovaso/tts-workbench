@@ -18,6 +18,14 @@ describe("app navigation", () => {
     });
   });
 
+  it("includes the independent realtime simulator in the left drawer", () => {
+    expect(appNavItems()).toContainEqual({
+      title: "实时仿真",
+      icon: "mdi-access-point-network",
+      to: "/realtime-simulator"
+    });
+  });
+
   it("includes corpora in the left drawer", () => {
     expect(appNavItems()).toContainEqual({
       title: "语料库",

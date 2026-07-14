@@ -13,6 +13,11 @@ export function appNavItems(): AppNavItem[] {
       to: "/synthesize"
     },
     {
+      title: "实时仿真",
+      icon: "mdi-access-point-network",
+      to: "/realtime-simulator"
+    },
+    {
       title: "音色管理",
       icon: "mdi-account-voice",
       to: "/voice-clone"
