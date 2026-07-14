@@ -5,12 +5,14 @@ import {
   type BenchmarkTextMode
 } from "@tts-platform/core";
 import type { FastifyInstance } from "fastify";
+import type { TTSFacade } from "../facade/tts-facade";
 import type { FileBenchmarkPlanArchive } from "../storage/benchmark-plan-archive";
 
 // registerBenchmarkPlanRoutes: 入参为 Fastify 实例和 Benchmark plan archive；功能是注册 plan HTTP API。
 export async function registerBenchmarkPlanRoutes(
   app: FastifyInstance,
-  plans: FileBenchmarkPlanArchive
+  plans: FileBenchmarkPlanArchive,
+  facade: TTSFacade
 ): Promise<void> {
   app.get("/v1/benchmark-plans", async () => {
     return {
@@ -25,6 +27,10 @@ export async function registerBenchmarkPlanRoutes(
   app.post("/v1/benchmark-plans", async (request, reply) => {
     const plan = await plans.createPlan(parseBenchmarkPlanCreateRequest(request.body));
     return reply.status(201).send({ plan });
+  });
+
+  app.post<{ Params: { planId: string } }>("/v1/benchmark-plans/:planId/run", async (request) => {
+    return plans.executePlan(decodeURIComponent(request.params.planId), facade);
   });
 }
 

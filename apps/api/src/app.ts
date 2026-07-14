@@ -118,7 +118,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<FastifyIn
   await registerRunRoutes(app, archive);
   await registerBenchConfigRoutes(app, benchConfigs);
   await registerCorpusRoutes(app, corpus);
-  await registerBenchmarkPlanRoutes(app, benchmarkPlans);
+  await registerBenchmarkPlanRoutes(app, benchmarkPlans, facade);
 
   return app;
 }

@@ -1,13 +1,17 @@
+import { performance } from "node:perf_hooks";
 import {
   TTSError,
   type TTSAdapter,
   type TTSCapabilities,
+  type TTSOutputFormat,
   type TTSStreamEvent,
   type TTSStreamPlan,
   type TTSSyncRequest,
   type TTSSyncResult,
   type TTSStreamRequest,
+  type TTSStreamResult,
   type TTSStreamSession,
+  type VendorPayload,
   type VoiceCloneInstantRequest,
   type VoiceCloneInstantResult,
   type VoiceCloneRequest,
@@ -89,6 +93,94 @@ export class TTSFacade {
   async synthesizeStream(request: TTSStreamRequest): Promise<TTSStreamSession> {
     const prepared = await this.prepareStream(request);
     return prepared.session;
+  }
+
+  // synthesizeStreamToArchive: 入参为流式合成请求；输出归档后的 stream run 和首包等执行指标。
+  async synthesizeStreamToArchive(request: TTSStreamRequest): Promise<TTSArchivedStreamExecution> {
+    const prepared = await this.prepareStream(request);
+    const startedAt = performance.now();
+    const vendorEvents: VendorPayload[] = [];
+    const audioChunks: Uint8Array[] = [];
+    let audioFormat: TTSOutputFormat | undefined;
+    let firstPacketLatencyMs: number | undefined;
+    let audioDurationMs: number | undefined;
+    let errorMessage: string | undefined;
+    let runStatus: "succeeded" | "failed" = "succeeded";
+    let finalResponse: VendorPayload = {
+      status: "started",
+      sessionId: prepared.session.sessionId
+    };
+
+    try {
+      for await (const event of prepared.adapter.synthesizeStream(prepared.plan)) {
+        vendorEvents.push(toArchiveStreamEvent(event));
+        if (event.type === "audio.chunk") {
+          if (firstPacketLatencyMs === undefined) {
+            firstPacketLatencyMs = elapsedMs(startedAt);
+          }
+          audioChunks.push(event.data);
+          audioFormat = event.format;
+          continue;
+        }
+
+        if (event.type === "session.completed") {
+          audioDurationMs = event.durationMs;
+          finalResponse = {
+            status: "succeeded",
+            event: toArchiveStreamEvent(event)
+          };
+        }
+        if (event.type === "error") {
+          runStatus = "failed";
+          errorMessage = event.message;
+          finalResponse = {
+            status: "failed",
+            event: toArchiveStreamEvent(event)
+          };
+        }
+      }
+    } catch (caught) {
+      runStatus = "failed";
+      errorMessage = caught instanceof Error ? caught.message : "Stream execution failed.";
+      finalResponse = {
+        status: "failed",
+        message: errorMessage
+      };
+      vendorEvents.push({
+        direction: "platform",
+        type: "error",
+        message: errorMessage
+      });
+    }
+
+    const result = await this.archive.writeStreamRun({
+      request: prepared.request,
+      plan: prepared.plan,
+      vendorEvents,
+      vendorResponse: finalResponse,
+      status: runStatus,
+      ...(audioChunks.length === 0 || audioFormat === undefined
+        ? {}
+        : {
+            audio: {
+              data: concatBytes(audioChunks),
+              format: audioFormat,
+              sampleRateHz: sampleRateFromStreamPlan(prepared.plan.vendorRequest)
+            }
+          })
+    });
+
+    return {
+      result,
+      metrics: {
+        totalLatencyMs: elapsedMs(startedAt),
+        ...(firstPacketLatencyMs === undefined ? {} : { firstPacketLatencyMs }),
+        audioByteLength: audioChunks.reduce((sum, chunk) => sum + chunk.byteLength, 0),
+        audioChunkCount: audioChunks.length,
+        ...(audioDurationMs === undefined ? {} : { audioDurationMs })
+      },
+      ...(errorMessage === undefined ? {} : { errorMessage })
+    };
   }
 
   async createVoiceClone(request: VoiceCloneRequest): Promise<VoiceCloneResult> {
@@ -272,4 +364,56 @@ export interface TTSPreparedStreamSession {
   request: TTSStreamRequest;
   plan: TTSStreamPlan;
   adapter: TTSStreamAdapter;
+}
+
+export interface TTSArchivedStreamMetrics {
+  totalLatencyMs: number;
+  firstPacketLatencyMs?: number;
+  audioDurationMs?: number;
+  audioByteLength: number;
+  audioChunkCount: number;
+}
+
+export interface TTSArchivedStreamExecution {
+  result: TTSStreamResult;
+  metrics: TTSArchivedStreamMetrics;
+  errorMessage?: string;
+}
+
+// toArchiveStreamEvent: 入参为统一流式事件；输出去除大块音频正文后的归档事件。
+function toArchiveStreamEvent(event: TTSStreamEvent): VendorPayload {
+  if (event.type === "audio.chunk") {
+    return {
+      type: event.type,
+      sequence: event.sequence,
+      byteLength: event.data.byteLength,
+      format: event.format,
+      ...(event.timestampMs === undefined ? {} : { timestampMs: event.timestampMs })
+    };
+  }
+  return event;
+}
+
+// concatBytes: 入参为多个 Uint8Array；输出按顺序拼接后的字节数组。
+function concatBytes(chunks: Uint8Array[]): Uint8Array {
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return result;
+}
+
+// sampleRateFromStreamPlan: 入参为 vendorRequest；输出流式归档音频的采样率。
+function sampleRateFromStreamPlan(vendorRequest: VendorPayload): number {
+  return typeof vendorRequest.sampleRateHz === "number" && Number.isFinite(vendorRequest.sampleRateHz)
+    ? vendorRequest.sampleRateHz
+    : 24000;
+}
+
+// elapsedMs: 入参为 performance 起点；输出四舍五入的耗时毫秒。
+function elapsedMs(startedAt: number): number {
+  return Math.max(0, Math.round(performance.now() - startedAt));
 }

@@ -1,0 +1,14 @@
+{
+  "sets": [
+    {
+      "configSetId": "f8fed2296480dc5889c30c2330ff3452500be44f40317e17f34f580d5a03bc02",
+      "digest": "f8fed2296480dc5889c30c2330ff3452500be44f40317e17f34f580d5a03bc02",
+      "name": "Benchmark 方案 配置组合",
+      "configIds": [
+        "50253d9f69f419715c1b1aa20401751f6cd2c24dd8606ded50ec85eb7cbe16ff"
+      ],
+      "createdAt": "2026-07-09T04:02:33.859Z",
+      "updatedAt": "2026-07-09T04:02:33.859Z"
+    }
+  ]
+}

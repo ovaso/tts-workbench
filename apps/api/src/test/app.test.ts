@@ -507,6 +507,206 @@ describe("api app", () => {
     expect(detailResponse.json().planId).toBe(planResponse.json().plan.planId);
   });
 
+  it("runs a benchmark plan through the mock TTS facade and records job results", async () => {
+    const corpusResponse = await app.inject({
+      method: "POST",
+      url: "/v1/corpus-items",
+      payload: {
+        title: "Greeting",
+        text: "hello benchmark run",
+        language: "en-US"
+      }
+    });
+    const corpusSetResponse = await app.inject({
+      method: "POST",
+      url: "/v1/corpus-sets",
+      payload: {
+        name: "Run corpus",
+        corpusItemIds: [corpusResponse.json().item.corpusItemId]
+      }
+    });
+    const configResponse = await app.inject({
+      method: "POST",
+      url: "/v1/bench-configs",
+      payload: {
+        displayName: "Mock run config",
+        providerId: "mock",
+        modelId: "mock-tts-v1",
+        voice: {
+          providerVoiceId: "mock-voice"
+        },
+        output: {
+          format: "wav",
+          sampleRateHz: 24000
+        }
+      }
+    });
+    const configSetResponse = await app.inject({
+      method: "POST",
+      url: "/v1/bench-config-sets",
+      payload: {
+        name: "Run configs",
+        configIds: [configResponse.json().config.configId]
+      }
+    });
+    const planResponse = await app.inject({
+      method: "POST",
+      url: "/v1/benchmark-plans",
+      payload: {
+        displayName: "Runnable benchmark",
+        corpusSetId: corpusSetResponse.json().set.corpusSetId,
+        configSetId: configSetResponse.json().set.configSetId
+      }
+    });
+
+    const runResponse = await app.inject({
+      method: "POST",
+      url: `/v1/benchmark-plans/${planResponse.json().plan.planId}/run`
+    });
+    const runsResponse = await app.inject({
+      method: "GET",
+      url: "/v1/runs"
+    });
+
+    expect(runResponse.statusCode).toBe(200);
+    expect(runResponse.json()).toMatchObject({
+      status: "succeeded",
+      summary: {
+        succeededJobs: 1,
+        failedJobs: 0
+      }
+    });
+    expect(runResponse.json().jobs[0]).toMatchObject({
+      status: "succeeded",
+      runId: expect.stringMatching(/^run_/),
+      metrics: {
+        textLength: "hello benchmark run".length,
+        firstPacketSource: "sync_not_observable",
+        totalLatencyMs: expect.any(Number),
+        audioDurationMs: expect.any(Number),
+        audioByteLength: expect.any(Number),
+        realtimeFactor: expect.any(Number)
+      }
+    });
+    expect(runResponse.json().summary).toMatchObject({
+      measuredJobs: 1,
+      averageTotalLatencyMs: expect.any(Number),
+      averageAudioDurationMs: expect.any(Number),
+      averageRealtimeFactor: expect.any(Number),
+      totalAudioByteLength: expect.any(Number)
+    });
+    expect(runsResponse.json().runs.map((run: { runId: string }) => run.runId)).toContain(
+      runResponse.json().jobs[0].runId
+    );
+  });
+
+  it("runs a stream benchmark plan and records first packet metrics", async () => {
+    const corpusResponse = await app.inject({
+      method: "POST",
+      url: "/v1/corpus-items",
+      payload: {
+        title: "Stream Greeting",
+        text: "hello stream benchmark",
+        language: "en-US"
+      }
+    });
+    const corpusSetResponse = await app.inject({
+      method: "POST",
+      url: "/v1/corpus-sets",
+      payload: {
+        name: "Stream corpus",
+        corpusItemIds: [corpusResponse.json().item.corpusItemId]
+      }
+    });
+    const configResponse = await app.inject({
+      method: "POST",
+      url: "/v1/bench-configs",
+      payload: {
+        displayName: "Mock stream config",
+        providerId: "mock",
+        modelId: "mock-tts-v1",
+        voice: {
+          providerVoiceId: "mock-voice"
+        },
+        output: {
+          format: "wav",
+          sampleRateHz: 24000
+        },
+        vendor: {
+          mode: "prefer_vendor",
+          extensions: {
+            mock: {
+              schemaVersion: "1.0.0",
+              params: {
+                durationMs: 260
+              }
+            }
+          }
+        }
+      }
+    });
+    const configSetResponse = await app.inject({
+      method: "POST",
+      url: "/v1/bench-config-sets",
+      payload: {
+        name: "Stream configs",
+        configIds: [configResponse.json().config.configId]
+      }
+    });
+    const planResponse = await app.inject({
+      method: "POST",
+      url: "/v1/benchmark-plans",
+      payload: {
+        displayName: "Stream benchmark",
+        corpusSetId: corpusSetResponse.json().set.corpusSetId,
+        configSetId: configSetResponse.json().set.configSetId,
+        operation: "tts.stream"
+      }
+    });
+
+    const runResponse = await app.inject({
+      method: "POST",
+      url: `/v1/benchmark-plans/${planResponse.json().plan.planId}/run`
+    });
+    const runsResponse = await app.inject({
+      method: "GET",
+      url: "/v1/runs"
+    });
+
+    expect(runResponse.statusCode).toBe(200);
+    expect(runResponse.json()).toMatchObject({
+      operation: "tts.stream",
+      status: "succeeded",
+      summary: {
+        succeededJobs: 1,
+        failedJobs: 0,
+        measuredJobs: 1,
+        averageFirstPacketLatencyMs: expect.any(Number)
+      }
+    });
+    expect(runResponse.json().jobs[0]).toMatchObject({
+      operation: "tts.stream",
+      status: "succeeded",
+      result: {
+        operation: "tts.stream"
+      },
+      metrics: {
+        firstPacketSource: "stream_audio_chunk",
+        firstPacketLatencyMs: expect.any(Number),
+        audioChunkCount: 1,
+        audioDurationMs: 260
+      }
+    });
+    expect(runsResponse.json().runs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          runId: runResponse.json().jobs[0].runId,
+          operation: "tts.stream"
+        })
+      ])
+    );
+  });
+
   it("filters corpus items, returns corpus stats, and expands corpus sets over HTTP", async () => {
     const supportResponse = await app.inject({
       method: "POST",
